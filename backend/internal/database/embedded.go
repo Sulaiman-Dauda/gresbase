@@ -74,8 +74,8 @@ func (ep *EmbeddedPostgres) Start() error {
 	runtimePath := filepath.Join(ep.dataDir, "pg_runtime")
 	dataPath := filepath.Join(ep.dataDir, "pg_data")
 
-	// Ensure directories exist
-	for _, dir := range []string{runtimePath, dataPath} {
+	// Ensure directories exist (including the bin/ subdirectory for PG binary extraction)
+	for _, dir := range []string{runtimePath, dataPath, filepath.Join(runtimePath, "bin")} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
@@ -86,7 +86,11 @@ func (ep *EmbeddedPostgres) Start() error {
 		Str("data_dir", dataPath).
 		Msg("Starting embedded PostgreSQL (development mode)")
 
-	// Configure embedded-postgres with proper settings
+	// Configure embedded-postgres with proper settings.
+	// The library extracts the txz archive to BinariesPath, and the archive
+	// root already contains bin/ lib/ share/ directories.
+	// So we point BinariesPath at the same level as RuntimePath, and the
+	// library will create bin/ inside it with the postgres binary.
 	embeddedPg := embeddedpostgres.NewDatabase(
 		embeddedpostgres.DefaultConfig().
 			Port(uint32(ep.port)).
@@ -95,7 +99,7 @@ func (ep *EmbeddedPostgres) Start() error {
 			Database(ep.dbName).
 			RuntimePath(runtimePath).
 			DataPath(dataPath).
-			BinariesPath(filepath.Join(runtimePath, "bin")).
+			BinariesPath(runtimePath).
 			StartTimeout(30 * time.Second).
 			Logger(log.Logger),
 	)

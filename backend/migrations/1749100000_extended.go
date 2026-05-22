@@ -40,12 +40,19 @@ CREATE TABLE IF NOT EXISTS _oauth_states (
 CREATE INDEX IF NOT EXISTS idx_oauth_states_provider_state ON _oauth_states(provider, state);
 
 CREATE TABLE IF NOT EXISTS _settings (
-    id          TEXT PRIMARY KEY DEFAULT 'app',
-    data        JSONB NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id            TEXT PRIMARY KEY DEFAULT 'default',
+    app_name      TEXT NOT NULL DEFAULT 'Gresbase',
+    app_url       TEXT NOT NULL DEFAULT 'http://localhost:8080',
+    sender_name   TEXT NOT NULL DEFAULT 'Gresbase',
+    sender_address TEXT NOT NULL DEFAULT '',
+    smtp          JSONB NOT NULL DEFAULT '{}',
+    s3            JSONB NOT NULL DEFAULT '{}',
+    security      JSONB NOT NULL DEFAULT '{}',
+    meta          JSONB NOT NULL DEFAULT '{}',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-INSERT INTO _settings (id, data) VALUES ('app', '{}') ON CONFLICT DO NOTHING;
+INSERT INTO _settings (id) VALUES ('default') ON CONFLICT DO NOTHING;
 `,
 	Down: `
 DROP TABLE IF EXISTS _settings CASCADE;
