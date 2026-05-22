@@ -1,75 +1,69 @@
 # Gresbase
 
-> **PocketBase meets Supabase meets Caddy** — a modern, insanely fast, elegant backend platform with PostgreSQL, embedded ACME CA, realtime engine, and Vercel-quality dashboard.
+> A self-hosted backend platform inspired by PocketBase — PostgreSQL-backed collections, authentication, realtime, and file storage in a single Go binary.
 
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://go.dev)
+> **⚠️ Development Status: Early-stage / Prototype (~35% production-ready).**
+> Auth and collections work. ACME CA, realtime, and frontend need more testing before production use.
+> See [Status](#project-status) for an honest assessment.
+
+[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-35%25-yellow)](https://github.com/gresbase/gresbase)
 
 ---
 
 ## What is Gresbase?
 
-A **single-binary, self-hosted backend platform** that combines:
+A **single-binary, self-hosted backend platform** that aims to provide:
 
-- **Dynamic Collections** — Define PostgreSQL-backed schemas from the dashboard or API
-- **Authentication** — Email/password, OAuth, magic links, OTP, API keys
-- **Realtime Engine** — WebSocket-based subscriptions with channel broadcasting
-- **File Storage** — Local or S3-compatible storage with signed URLs
-- **Embedded ACME CA** — Issue TLS certificates from your own CA, ACME-compatible
-- **Admin Dashboard** — Dark-mode-first, Vercel-grade UI built with Next.js
-- **Extensible** — Plugin architecture with event hooks at every level
-- **Multi-tenant** — Built-in tenant isolation
+- **Dynamic Collections** — Define PostgreSQL-backed schemas from the dashboard or API ✅
+- **Authentication** — Email/password, OAuth, magic links, OTP, API keys ✅ (most complete)
+- **Realtime Engine** — WebSocket-based subscriptions with channel broadcasting 🚧
+- **File Storage** — Local or S3-compatible storage with signed URLs 🚧
+- **Embedded ACME CA** — Internal certificate authority with ACME protocol 🚧 (experimental)
+- **Admin Dashboard** — Next.js + Tailwind CSS + shadcn/ui 🚧 (scaffolded, needs wiring)
+- **Extensible** — Plugin architecture with event hooks and JS runtime 🚧
+- **Multi-tenant** — Built-in tenant isolation ✅
+
+**Legend**: ✅ = Working with tests | 🚧 = Implemented, needs more testing | 📋 = Planned
 
 ## Quick Start
 
-### Single Binary (Zero Dependencies)
-
-Download the single static binary and run:
-
-```bash
-# Download latest release
-curl -L https://github.com/gresbase/gresbase/releases/latest/download/gresbase_linux_amd64 -o gresbase
-chmod +x gresbase
-
-# Start — embedded PostgreSQL auto-starts, no dependencies needed!
-./gresbase serve
-```
-
-**That's it.** One binary. Embedded PostgreSQL auto-starts on first run. The admin dashboard is built into the binary. Open http://localhost:8080 and you're in.
-
-### With External PostgreSQL
-
-```bash
-DATABASE_URL="postgres://user:pass@host:5432/gresbase?sslmode=disable" \
-  JWT_SECRET="your-secret-key" \
-  ./gresbase serve
-```
-
-### From Source
+### From Source (recommended for development)
 
 ```bash
 git clone https://github.com/gresbase/gresbase
 cd gresbase
 
-# Build the single binary
+# Build everything (frontend + backend → single binary)
 make build
 
-# Start
-cd backend && ./gresbase serve
+# Start with embedded PostgreSQL
+cd backend && DATABASE_URL="" JWT_SECRET="dev-secret-change-me" ./gresbase serve
+```
+
+### With External PostgreSQL (production)
+
+```bash
+DATABASE_URL="postgres://user:pass@host:5432/gresbase?sslmode=disable" \
+  JWT_SECRET="your-64-char-hex-secret" \
+  ./gresbase serve
 ```
 
 ### CLI Commands
 
 ```bash
-./gresbase serve                  # Start server (embedded PostgreSQL)
-./gresbase superuser create admin@example.com mypassword  # Create admin
-./gresbase migrate                # Run database migrations
-./gresbase cert issue example.com # Issue TLS certificate
-./gresbase backup create          # Create backup
-./gresbase info                   # Show system info
-./gresbase version                # Show version
+./gresbase serve                              # Start server
+./gresbase superuser create admin@ex.com pass # Create admin
+./gresbase migrate                            # Run database migrations
+./gresbase cert issue example.com             # Issue TLS certificate (experimental)
+./gresbase version                            # Show version
 ```
+
+📖 **Full deployment guide**: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+📖 **API reference**: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
+📖 **Architecture**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## Architecture
 
@@ -283,57 +277,14 @@ Configuration via `gresbase.yaml`, environment variables, or CLI flags:
 
 ## Deployment
 
-### Docker
-
-```bash
-docker build -t gresbase -f docker/Dockerfile .
-docker run -d \
-  -e DATABASE_URL="postgres://..." \
-  -p 8080:8080 \
-  gresbase
-```
-
-### Fly.io
-
-```toml
-# fly.toml
-app = "gresbase"
-kill_signal = "SIGINT"
-kill_timeout = 5
-
-[build]
-  image = "gresbase:latest"
-
-[env]
-  DATABASE_URL = "postgres://..."
-
-[[services]]
-  internal_port = 8080
-```
-
-### Kubernetes
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: gresbase
-spec:
-  replicas: 1
-  template:
-    spec:
-      containers:
-        - name: gresbase
-          image: gresbase:latest
-          ports:
-            - containerPort: 8080
-          env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: gresbase-secrets
-                  key: database-url
-```
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for comprehensive guides covering:
+- Single binary with systemd
+- Docker & Docker Compose
+- Kubernetes with ingress
+- Fly.io, Railway
+- Nginx reverse proxy
+- Backup & restore
+- Monitoring & troubleshooting
 
 ## Development
 
@@ -384,6 +335,100 @@ gresbase/
 ├── docker/                  # Docker configs
 └── sdk/                     # Client SDKs (TS + Dart)
 ```
+
+## Project Status
+
+This is an **early-stage project** (~35% production-ready). Here's an honest assessment:
+
+### What works well ✅
+- **Authentication** — Email/password, OAuth providers, OTP, magic links, API keys. The most complete subsystem with decent test coverage.
+- **Dynamic Collections** — Define schemas, PostgreSQL-backed tables, field types. Basic CRUD operations.
+- **Record model** — Typed getters/setters, JSON serialization, field picking, relation expansion. Well-tested (84.7%).
+- **Filter/query engine** — Expression-based filtering. Tested (63.6%).
+- **Configuration** — YAML + env vars. Well-tested (88.5%).
+- **Plugin architecture** — Event hooks, JS runtime (goja). Basic functionality tested.
+- **Metrics/health checks** — Runtime stats, health endpoint (94.3% coverage).
+- **OpenAPI generation** — Auto-generated spec from route definitions (87.0% coverage).
+
+### Needs more testing 🚧
+- **Realtime engine** — WebSocket/SSE works but needs load testing (45.0% coverage).
+- **File storage** — Local and S3 backends work but need integration tests (25.1% coverage).
+- **ACME CA** — Internal CA issues certificates, ACME protocol partially implemented (24.8% coverage).
+  - HTTP-01 challenge validation works. DNS-01 is scaffolded.
+  - NOT production-ready for TLS. Use Nginx + certbot for now.
+- **Admin dashboard** — Next.js pages are scaffolded. UI components are built but API wiring is incomplete.
+- **Tenant isolation** — Basic support, low test coverage (15.6%).
+
+### Not yet implemented 📋
+- Edge Functions (JavaScript serverless runtime)
+- Row-Level Security (RLS) — access rules exist but are not enforced at the DB level
+- Vector search / pgvector integration
+- GraphQL support
+- Horizontal scaling with message broker
+- Comprehensive integration test suite
+- Published SDK packages (npm, pub.dev)
+
+### Test Coverage
+
+| Package | Coverage | Status |
+|---------|----------|--------|
+| metrics | 94.3% | ✅ |
+| config | 88.5% | ✅ |
+| openapi | 87.0% | ✅ |
+| record | 84.7% | ✅ |
+| security | 84.8% | ✅ |
+| subscriptions | 96.9% | ✅ |
+| events | 60.8% | 🟨 |
+| filter | 63.6% | 🟨 |
+| middleware | 55.6% | 🟨 |
+| realtime | 45.0% | 🟨 |
+| mailer | 34.6% | 🟨 |
+| fields | 29.6% | 🟨 |
+| jsplugin | 28.3% | 🟨 |
+| app | 27.4% | 🟨 |
+| storage | 25.1% | 🟨 |
+| acme | 24.8% | 🟨 |
+| search | 20.0% | 🟨 |
+| tenant | 15.6% | 🔴 |
+| api | 13.3% | 🔴 |
+| query | 11.7% | 🔴 |
+| job | 8.5% | 🔴 |
+| auth | 7.2% | 🔴 |
+| collection | 7.0% | 🔴 |
+| database | 3.5% | 🔴 |
+| settings | 0.9% | 🔴 |
+
+**Overall: ~35% by line count** (25 of 32 packages have tests)
+
+### Roadmap
+
+1. **Milestone 1 — Solid Core** (target: 70% coverage)
+   - [ ] Full integration test suite with testcontainers
+   - [ ] Auth test coverage from 7% → 60%+
+   - [ ] Collection test coverage from 7% → 60%+
+   - [ ] Database layer tests
+
+2. **Milestone 2 — Working Dashboard**
+   - [ ] Wire all Next.js pages to the API
+   - [ ] Add frontend tests (Vitest)
+   - [ ] Collection schema editor
+   - [ ] File browser
+
+3. **Milestone 3 — Production-grade ACME**
+   - [ ] Full ACME v2 compliance
+   - [ ] DNS-01 challenge with common providers
+   - [ ] Integration tests
+
+4. **Milestone 4 — SDK Releases**
+   - [ ] Publish TypeScript SDK to npm
+   - [ ] Publish Dart SDK to pub.dev
+   - [ ] SDK documentation
+
+5. **Milestone 5 — Advanced Features**
+   - [ ] Row-Level Security at PostgreSQL level
+   - [ ] Edge Functions runtime
+   - [ ] Vector search
+   - [ ] Real-time presence
 
 ## License
 
