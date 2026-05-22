@@ -1,0 +1,54 @@
+# Gresbase Configuration
+# Copy this to gresbase.yaml and customize
+
+# Server
+addr: ":8080"
+domain: "localhost"
+enable_tls: false
+cert_email: "admin@example.com"
+
+# Database
+database_url: "postgres://gresbase:gresbase@localhost:5432/gresbase?sslmode=disable"
+database_max_open_conns: 25
+database_max_idle_conns: 5
+
+# Auth
+jwt_secret: "change-this-to-a-random-64-char-string-in-production"
+access_token_expiry: 15m
+refresh_token_expiry: 168h  # 7 days
+
+# Storage
+storage_backend: "local"  # local or s3
+storage_local_path: "./storage"
+
+# S3 (optional)
+# s3_endpoint: "https://s3.amazonaws.com"
+# s3_bucket: "my-bucket"
+# s3_region: "us-east-1"
+# s3_access_key: ""
+# s3_secret_key: ""
+# s3_use_ssl: true
+
+# ACME
+acme_cache_dir: "./.certmagic"
+acme_enabled: false
+
+# Email (SMTP)
+# smtp_host: "smtp.example.com"
+# smtp_port: 587
+# smtp_username: ""
+# smtp_password: ""
+# smtp_from: "noreply@example.com"
+
+# Realtime
+realtime_max_connections: 10000
+realtime_idle_timeout: 5m
+
+# Rate Limiting
+rate_limit_enabled: true
+rate_limit_rps: 100
+rate_limit_burst: 200
+
+# Development
+dev_mode: false
+log_level: "info"  # debug, info, warn, error

@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  gresbase:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - '8080:8080'
+    environment:
+      - DATABASE_URL=postgres://gresbase:gresbase@db:5432/gresbase?sslmode=disable
+      - JWT_SECRET=change-this-to-a-random-64-char-string-in-production
+      - STORAGE_PATH=/app/storage
+      - LOG_LEVEL=info
+    volumes:
+      - gresbase_storage:/app/storage
+      - gresbase_config:/app/config
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=gresbase
+      - POSTGRES_PASSWORD=gresbase
+      - POSTGRES_DB=gresbase
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U gresbase']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  gresbase_storage:
+  gresbase_config:
+  postgres_data:

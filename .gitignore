@@ -1,0 +1,59 @@
+# Gresbase
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build
+dist/
+build/
+.next/
+out/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Testing
+coverage/
+.nyc_output/
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Storage
+storage/
+.backups/
+.certmagic/
+
+# Embedded PostgreSQL data (single-binary mode)
+gresbase_data/
+backend/gresbase_data/
+backend/internal/ui/dist/*
+!backend/internal/ui/dist/PLACEHOLDER
+
+# Logs
+*.log
+
+# Go
+vendor/
+backend/gresbase
+backend/gresbase_*
+
+# Temp
+tmp/
+temp/

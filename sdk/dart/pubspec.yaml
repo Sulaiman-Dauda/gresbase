@@ -1,0 +1,13 @@
+name: gresbase_sdk
+description: Official Dart SDK for Gresbase — realtime subscriptions, auth, file upload, full CRUD
+version: 0.1.0
+homepage: https://github.com/gresbase/gresbase
+repository: https://github.com/gresbase/gresbase
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies: {}
+
+dev_dependencies:
+  test: ^1.24.0

@@ -1,0 +1,26 @@
+{
+  "name": "@gresbase/sdk",
+  "version": "0.1.0",
+  "description": "Official TypeScript SDK for Gresbase — realtime subscriptions, auth, file upload, full CRUD",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["gresbase", "sdk", "realtime", "backend", "api-client"],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
