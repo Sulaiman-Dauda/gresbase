@@ -76,22 +76,39 @@ func ServeFallback(w http.ResponseWriter, r *http.Request) {
 func spaHandler(fsys http.FileSystem) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := filepath.Clean(r.URL.Path)
-		if path == "/" {
+
+		// If requesting root, serve index.html
+		if path == "/" || path == "/index" {
 			path = "/index.html"
 		}
+
+		// Try the exact path first
 		f, err := fsys.Open(strings.TrimPrefix(path, "/"))
 		if err != nil {
-			index, err := fsys.Open("index.html")
-			if err != nil {
+			// Try adding .html for SPA routes (Next.js static export)
+			if !strings.HasSuffix(path, ".html") && filepath.Ext(path) == "" {
+				f, err = fsys.Open(strings.TrimPrefix(path, "/") + ".html")
+				if err == nil {
+					path = path + ".html"
+					goto serve
+				}
+			}
+
+			// Fall back to index.html for client-side routing
+			index, indexErr := fsys.Open("index.html")
+			if indexErr != nil {
 				ServeFallback(w, r)
 				return
 			}
 			defer index.Close()
 			stat, _ := index.Stat()
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache")
 			http.ServeContent(w, r, "index.html", stat.ModTime(), index)
 			return
 		}
+
+	serve:
 		defer f.Close()
 		stat, err := f.Stat()
 		if err != nil {

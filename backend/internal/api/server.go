@@ -74,8 +74,7 @@ func (s *Server) mountRoutes() {
 	h := s.h
 
 	// Built-in web UI dashboard (embedded frontend or fallback HTML)
-	r.Get("/", s.serveUI)
-	r.Get("/_/*", s.serveUI)
+	// Serve Next.js assets directly (must be before API routes)
 	r.Handle("/_next/*", s.uiHandler)
 	r.Handle("/static/*", s.uiHandler)
 
@@ -275,6 +274,10 @@ func (s *Server) mountRoutes() {
 
 	// ACME HTTP-01 challenge handler at well-known path
 	r.Get("/.well-known/acme-challenge/{token}", h.ACMEHTTPChallenge)
+
+	// Catch-all SPA route — serves the embedded dashboard for any path
+	// not matched by API routes above. Must be registered last.
+	r.Handle("/*", http.HandlerFunc(s.serveUI))
 }
 
 // Start begins listening. Supports TLS when configured.
