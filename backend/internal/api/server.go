@@ -73,10 +73,8 @@ func (s *Server) mountRoutes() {
 	mw := s.mw
 	h := s.h
 
-	// Built-in web UI dashboard (embedded frontend or fallback HTML)
-	// Serve Next.js assets directly (must be before API routes)
-	r.Handle("/_next/*", s.uiHandler)
-	r.Handle("/static/*", s.uiHandler)
+	// Built-in web UI dashboard (embedded frontend or fallback HTML).
+	// Everything that's not an API route is served by the SPA handler.
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", h.Health)

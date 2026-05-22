@@ -24,7 +24,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-//go:embed dist
+//go:embed all:dist
 var embeddedFrontend embed.FS
 
 // HasEmbeddedFrontend reports whether the binary was built with the
@@ -92,6 +92,15 @@ func spaHandler(fsys http.FileSystem) http.Handler {
 					path = path + ".html"
 					goto serve
 				}
+			}
+
+			// For requests with static file extensions (.css, .js, .png, etc.),
+			// return 404 instead of falling back to index.html — browsers
+			// reject HTML responses for CSS/JS with strict MIME checking.
+			ext := filepath.Ext(path)
+			if ext != "" && ext != ".html" {
+				http.NotFound(w, r)
+				return
 			}
 
 			// Fall back to index.html for client-side routing
