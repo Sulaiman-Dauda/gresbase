@@ -15,7 +15,7 @@ class ApiClient {
     return this.token
   }
 
-  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string> || {}),
@@ -83,6 +83,8 @@ class ApiClient {
   getCertificates = () => this.request<any[]>('/certificates')
   issueCertificate = (domain: string) =>
     this.request<any>('/certificates/issue', { method: 'POST', body: JSON.stringify({ domain }) })
+  revokeCertificate = (id: string) =>
+    this.request<any>(`/certificates/${id}`, { method: 'DELETE' })
 
   // API Keys
   getApiKeys = () => this.request<any[]>('/api-keys')
@@ -91,7 +93,10 @@ class ApiClient {
   deleteApiKey = (id: string) => this.request<any>(`/api-keys/${id}`, { method: 'DELETE' })
 
   // Logs
-  getLogs = () => this.request<any[]>('/logs')
+  getLogs = (params?: Record<string, string>) => {
+    const q = params ? '?' + new URLSearchParams(params).toString() : ''
+    return this.request<{ items: any[]; page: number; totalItems: number }>(`/logs${q}`)
+  }
 
   // Settings
   getSettings = () => this.request<any>('/settings')

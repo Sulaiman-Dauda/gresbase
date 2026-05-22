@@ -75,7 +75,7 @@ export default function CertificatesPage() {
   const handleRevoke = async (id: string) => {
     if (!confirm('Revoke this certificate? The domain will lose HTTPS.')) return
     try {
-      await api.request(`/api/v1/certificates/${id}`, { method: 'DELETE' })
+      await api.revokeCertificate(id)
       fetchCerts()
     } catch (err: any) {
       setError(err.message)

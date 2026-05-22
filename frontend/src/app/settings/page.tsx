@@ -226,7 +226,7 @@ export default function SettingsPage() {
                   <div key={field.key} className="space-y-2">
                     <label className="text-sm font-medium">
                       {field.label}
-                      {field.disabled && (
+                      {(field as any).disabled && (
                         <Badge variant="secondary" className="ml-2 text-[10px]">read-only</Badge>
                       )}
                     </label>
@@ -244,7 +244,7 @@ export default function SettingsPage() {
                       <select
                         value={settings[field.key] || (field as any).placeholder || ''}
                         onChange={e => updateField(field.key, e.target.value)}
-                        disabled={field.disabled}
+                        disabled={(field as any).disabled}
                         className="w-full h-9 rounded-lg border border-border bg-background px-3 text-sm"
                       >
                         {(field as any).options?.map((opt: string) => (
@@ -257,7 +257,7 @@ export default function SettingsPage() {
                         value={settings[field.key] || ''}
                         onChange={e => updateField(field.key, e.target.value)}
                         placeholder={(field as any).placeholder}
-                        disabled={field.disabled}
+                        disabled={(field as any).disabled}
                       />
                     ) : field.type === 'number' ? (
                       <Input
@@ -265,7 +265,7 @@ export default function SettingsPage() {
                         value={settings[field.key] || ''}
                         onChange={e => updateField(field.key, parseInt(e.target.value) || 0)}
                         placeholder={(field as any).placeholder}
-                        disabled={field.disabled}
+                        disabled={(field as any).disabled}
                       />
                     ) : (
                       <Input
@@ -273,7 +273,7 @@ export default function SettingsPage() {
                         value={settings[field.key] || ''}
                         onChange={e => updateField(field.key, e.target.value)}
                         placeholder={(field as any).placeholder}
-                        disabled={field.disabled}
+                        disabled={(field as any).disabled}
                       />
                     )}
                   </div>
