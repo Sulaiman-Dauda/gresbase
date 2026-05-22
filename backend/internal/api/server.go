@@ -84,6 +84,10 @@ func (s *Server) mountRoutes() {
 		r.Get("/openapi.json", h.OpenAPI)
 		r.Get("/metrics", h.Metrics)
 
+		// First-time setup — only available when no admins exist
+		r.Get("/setup", h.SetupStatus)
+		r.Post("/setup", h.SetupCreate)
+
 		// Auth
 		r.Route("/auth", func(r chi.Router) {
 			r.With(httprate.LimitByIP(10, time.Minute)).Post("/login", h.Login)

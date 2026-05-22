@@ -294,6 +294,17 @@ func (s *Service) FindAdminByID(ctx context.Context, id string) (*AdminUser, err
 	return admin, nil
 }
 
+// CountAdmins returns the total number of admin users across all tenants.
+// Used to determine if first-time setup is required.
+func (s *Service) CountAdmins(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM _admins`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count admins: %w", err)
+	}
+	return count, nil
+}
+
 // ListAdmins lists all admins for a tenant.
 func (s *Service) ListAdmins(ctx context.Context, tenantID string) ([]*AdminUser, error) {
 	rows, err := s.db.Pool.Query(ctx, `

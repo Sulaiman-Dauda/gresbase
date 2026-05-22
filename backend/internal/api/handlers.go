@@ -443,6 +443,65 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// SetupStatus checks whether the system needs first-time setup (no admin exists).
+func (h *Handlers) SetupStatus(w http.ResponseWriter, r *http.Request) {
+	adminCount, err := h.app.Auth().CountAdmins(r.Context())
+	if err != nil {
+		writeError(w, 500, "Failed to check admin status")
+		return
+	}
+	writeOK(w, map[string]any{
+		"setup_required": adminCount == 0,
+		"admin_count":    adminCount,
+	})
+}
+
+// SetupCreate creates the FIRST admin when no admin exists yet.
+// Once any admin exists, this endpoint becomes unavailable.
+func (h *Handlers) SetupCreate(w http.ResponseWriter, r *http.Request) {
+	// Only allow setup when no admin exists
+	adminCount, err := h.app.Auth().CountAdmins(r.Context())
+	if err != nil {
+		writeError(w, 500, "Failed to check admin status")
+		return
+	}
+	if adminCount > 0 {
+		writeError(w, 403, "Setup already completed. Use /auth/login to sign in.")
+		return
+	}
+
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "Invalid request body")
+		return
+	}
+	if body.Email == "" || body.Password == "" || len(body.Password) < 8 {
+		writeError(w, 400, "Email and password (min 8 chars) required")
+		return
+	}
+
+	admin, err := h.app.Auth().CreateAdmin(r.Context(), body.Email, body.Password, "super_admin", "default")
+	if err != nil {
+		writeError(w, 409, "Failed to create admin: "+err.Error())
+		return
+	}
+
+	token, refreshToken, _ := h.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role, admin.TenantID)
+	h.app.Auth().RecordAudit(r.Context(), admin.ID, "setup.first_admin", "_admins", admin.ID, nil, r)
+
+	log.Info().Str("email", admin.Email).Str("id", admin.ID).Msg("🎉 First admin created — Gresbase is ready!")
+
+	writeJSON(w, 201, map[string]any{
+		"token":        token,
+		"refreshToken": refreshToken,
+		"admin":        sanitizeAdmin(admin),
+		"message":      "Setup complete! Welcome to Gresbase.",
+	})
+}
+
 func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email    string `json:"email"`
@@ -457,7 +516,15 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	admin, err := h.app.Auth().CreateAdmin(r.Context(), body.Email, body.Password, "admin", "default")
+	// Check if this is the first admin (setup mode) or an existing admin adding another
+	adminCount, _ := h.app.Auth().CountAdmins(r.Context())
+	role := "admin"
+	if adminCount == 0 {
+		role = "super_admin"
+		log.Info().Msg("First admin registration — granting super_admin role")
+	}
+
+	admin, err := h.app.Auth().CreateAdmin(r.Context(), body.Email, body.Password, role, "default")
 	if err != nil {
 		writeError(w, 409, "Email already in use")
 		return

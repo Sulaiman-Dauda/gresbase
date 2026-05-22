@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useStore } from '@/lib/store'
 import { toast } from 'sonner'
-import { Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2, Sparkles } from 'lucide-react'
 
 export function LoginForm() {
   const router = useRouter()
@@ -15,6 +15,19 @@ export function LoginForm() {
   const [password, setPassword] = useState('')
   const [show, setShow] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [setupRequired, setSetupRequired] = useState(false)
+  const [checkingSetup, setCheckingSetup] = useState(true)
+
+  // Check if first-time setup is needed
+  useEffect(() => {
+    fetch('/api/v1/setup')
+      .then(r => r.json())
+      .then(data => {
+        setSetupRequired(data.setup_required === true)
+        setCheckingSetup(false)
+      })
+      .catch(() => setCheckingSetup(false))
+  }, [])
 
   useEffect(() => {
     if (isAuthenticated) router.push('/overview')
@@ -24,9 +37,25 @@ export function LoginForm() {
     e.preventDefault()
     setLoading(true)
     try {
-      await login(email, password)
-      toast.success('Signed in')
-      router.push('/overview')
+      if (setupRequired) {
+        // First-run setup — create the initial admin
+        const res = await fetch('/api/v1/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.message)
+
+        // Store token and redirect
+        localStorage.setItem('gresbase_token', data.token)
+        toast.success('Setup complete! Welcome to Gresbase.')
+        router.push('/overview')
+      } else {
+        await login(email, password)
+        toast.success('Signed in')
+        router.push('/overview')
+      }
     } catch (err: any) {
       toast.error(err.message || 'Invalid credentials')
     } finally {
@@ -34,8 +63,25 @@ export function LoginForm() {
     }
   }
 
+  if (checkingSetup) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {setupRequired && (
+        <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-3 text-sm text-blue-600 dark:text-blue-400">
+          <div className="flex items-center gap-2 font-medium mb-1">
+            <Sparkles className="h-4 w-4" />
+            Welcome! Create your admin account
+          </div>
+          <p className="text-xs opacity-80">No admins exist yet. Set up your first super admin to get started.</p>
+        </div>
+      )}
       <div className="space-y-2">
         <label className="text-sm font-medium">Email</label>
         <Input type="email" placeholder="admin@example.com" value={email}
@@ -53,7 +99,8 @@ export function LoginForm() {
         </div>
       </div>
       <Button type="submit" className="w-full" disabled={loading}>
-        {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/>Signing in...</> : 'Sign in'}
+        {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/>{setupRequired ? 'Setting up...' : 'Signing in...'}</> :
+          setupRequired ? <>Create admin account</> : 'Sign in'}
       </Button>
     </form>
   )
