@@ -162,19 +162,19 @@ func ValidateOverride(id, subject, body string) error {
 	if subject != "" {
 		tmpl, err := texttemplate.New(id + "_subject").Parse(subject)
 		if err != nil {
-			return fmt.Errorf("subject: %v", err)
+			return fmt.Errorf("subject: %w", err)
 		}
 		if err := tmpl.Execute(&bytes.Buffer{}, sample); err != nil {
-			return fmt.Errorf("subject: %v", err)
+			return fmt.Errorf("subject: %w", err)
 		}
 	}
 	if body != "" {
 		tmpl, err := htmltemplate.New(id).Parse(body)
 		if err != nil {
-			return fmt.Errorf("body: %v", err)
+			return fmt.Errorf("body: %w", err)
 		}
 		if err := tmpl.Execute(&bytes.Buffer{}, sample); err != nil {
-			return fmt.Errorf("body: %v", err)
+			return fmt.Errorf("body: %w", err)
 		}
 	}
 	return nil
@@ -289,6 +289,7 @@ const defaultOTPBody = `<!DOCTYPE html>
 </body>
 </html>`
 
+//nolint:gosec // G101 false positive: HTML email template for password-reset notifications, not a credential.
 const defaultPasswordResetBody = `<!DOCTYPE html>
 <html>
 <body style="font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; padding: 40px;">

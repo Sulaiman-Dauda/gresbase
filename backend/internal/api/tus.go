@@ -53,6 +53,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gresbase/gresbase/internal/app"
 	"github.com/gresbase/gresbase/internal/collection"
+	"github.com/gresbase/gresbase/internal/ctxkeys"
 	"github.com/gresbase/gresbase/internal/events"
 	"github.com/gresbase/gresbase/internal/storage"
 	"github.com/rs/zerolog/log"
@@ -444,20 +445,20 @@ func tusRequestInfoFromContext(ctx context.Context) *RequestInfo {
 	if role, ok := ctx.Value(contextKeyAdminRole).(string); ok {
 		info.Role = role
 	}
-	if email, ok := ctx.Value("email").(string); ok {
+	if email, ok := ctx.Value(ctxkeys.Email).(string); ok {
 		info.Email = email
 	}
-	if recordID, ok := ctx.Value("record_id").(string); ok && recordID != "" {
+	if recordID, ok := ctx.Value(ctxkeys.RecordID).(string); ok && recordID != "" {
 		info.IsRecordAuth = true
 		info.RecordID = recordID
 	}
-	if collectionID, ok := ctx.Value("collection_id").(string); ok {
+	if collectionID, ok := ctx.Value(ctxkeys.CollectionID).(string); ok {
 		info.CollectionID = collectionID
 	}
-	if verified, ok := ctx.Value("verified").(bool); ok {
+	if verified, ok := ctx.Value(ctxkeys.Verified).(bool); ok {
 		info.Verified = verified
 	}
-	if anonymous, ok := ctx.Value("anonymous").(bool); ok {
+	if anonymous, ok := ctx.Value(ctxkeys.Anonymous).(bool); ok {
 		info.Anonymous = anonymous
 	}
 	return info

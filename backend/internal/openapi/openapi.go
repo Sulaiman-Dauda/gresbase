@@ -271,7 +271,9 @@ func ExtractRoutes(r chi.Router) []RouteDef {
 }
 
 func walkChiRouter(r chi.Router, prefix string, routes *[]RouteDef) {
-	if err := chi.Walk(r, func(method, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
+	// chi.Walk only errors on a malformed router (a programming error during
+	// boot); the spec is best-effort, so any failure leaves routes as-is.
+	_ = chi.Walk(r, func(method, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
 		if !shouldDocumentMethod(method) {
 			return nil
 		}
@@ -292,9 +294,7 @@ func walkChiRouter(r chi.Router, prefix string, routes *[]RouteDef) {
 		}
 		*routes = append(*routes, def)
 		return nil
-	}); err != nil {
-		// Walk failed silently
-	}
+	})
 }
 
 func shouldDocumentMethod(method string) bool {
@@ -598,7 +598,7 @@ func operationIDFromRoute(method, route string) string {
 		if strings.HasPrefix(p, "{") || strings.HasPrefix(p, ":") {
 			continue // skip path params
 		}
-		id += strings.Title(strings.ReplaceAll(p, "-", "_"))
+		id += titleASCII(strings.ReplaceAll(p, "-", "_"))
 	}
 	return id
 }
@@ -648,10 +648,20 @@ func Handler(spec *Spec) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		json.NewEncoder(w).Encode(spec)
+		_ = json.NewEncoder(w).Encode(spec) // response already committed; nothing to do on encode failure
 	}
 }
 
-// Ensure imports are used
-var _ = strings.Title
-var _ = chi.Walk
+// titleASCII upper-cases the first byte of an ASCII identifier segment. It
+// replaces the deprecated strings.Title for the simple identifier casing used
+// when building operation IDs (segments are ASCII path components).
+func titleASCII(s string) string {
+	if s == "" {
+		return s
+	}
+	b := []byte(s)
+	if b[0] >= 'a' && b[0] <= 'z' {
+		b[0] -= 'a' - 'A'
+	}
+	return string(b)
+}

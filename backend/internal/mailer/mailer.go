@@ -230,12 +230,12 @@ func (s *SMTPSender) Send(msg *Message) error {
 	if err != nil {
 		return fmt.Errorf("smtp client: %w", err)
 	}
-	defer client.Quit()
+	defer func() { _ = client.Quit() }() // best-effort SMTP session teardown
 
 	if s.username != "" {
 		auth := smtp.PlainAuth("", s.username, s.password, s.host)
 		if ok, _ := client.Extension("STARTTLS"); ok {
-			tlsCfg := &tls.Config{ServerName: s.host}
+			tlsCfg := &tls.Config{ServerName: s.host, MinVersion: tls.VersionTLS12}
 			if err := client.StartTLS(tlsCfg); err != nil {
 				return fmt.Errorf("starttls: %w", err)
 			}

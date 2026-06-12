@@ -24,7 +24,7 @@ func TestRuntime_LoadPlugin(t *testing.T) {
 		t.Fatalf("LoadPlugin: %v", err)
 	}
 	if plugin == nil {
-		t.Error("expected non-nil plugin")
+		t.Fatal("expected non-nil plugin")
 	}
 	if plugin.Name != "test" {
 		t.Errorf("expected name 'test', got %q", plugin.Name)

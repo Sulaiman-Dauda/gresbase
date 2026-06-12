@@ -557,7 +557,7 @@ func (s *BackupService) DownloadBackupFromS3(ctx context.Context, backupID strin
 		return fmt.Errorf("download from storage: %w", err)
 	}
 
-	return os.WriteFile(backupPath, data, 0644)
+	return os.WriteFile(backupPath, data, 0o600)
 }
 
 // ---------------------------------------------------------------------------

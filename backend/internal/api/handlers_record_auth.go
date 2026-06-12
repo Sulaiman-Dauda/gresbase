@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gresbase/gresbase/internal/auth"
+	"github.com/gresbase/gresbase/internal/ctxkeys"
 	"github.com/gresbase/gresbase/internal/events"
 	"github.com/gresbase/gresbase/internal/forms"
 )
@@ -546,7 +547,7 @@ func (h *Handlers) RecordEmailChangeConfirm(w http.ResponseWriter, r *http.Reque
 // getRecordIDFromContext extracts the record ID from the request context
 // (set by middleware from the record auth JWT token).
 func getRecordIDFromContext(r *http.Request) string {
-	if rid, ok := r.Context().Value("record_id").(string); ok {
+	if rid, ok := r.Context().Value(ctxkeys.RecordID).(string); ok {
 		return rid
 	}
 	return ""

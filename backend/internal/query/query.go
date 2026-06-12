@@ -5,6 +5,7 @@ package query
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/gresbase/gresbase/internal/database"
 	"github.com/gresbase/gresbase/internal/filter"
 	"github.com/jackc/pgx/v5"
+	"github.com/rs/zerolog/log"
 )
 
 // Params represents query parameters from the HTTP request.
@@ -257,7 +259,8 @@ func (b *Builder) List(ctx context.Context) ([]map[string]any, int, error) {
 	// Expand relations if requested
 	if b.params.Expand != "" && len(records) > 0 {
 		if err := b.expandRelations(ctx, records); err != nil {
-			// Non-fatal - return records without expanded relations
+			// Non-fatal: return records without expanded relations.
+			log.Warn().Err(err).Msg("query: relation expansion failed; returning unexpanded records")
 		}
 	}
 
@@ -273,7 +276,7 @@ func (b *Builder) Get(ctx context.Context, id string) (map[string]any, error) {
 	var raw json.RawMessage
 	err := b.db.QueryRow(ctx, selectSQL, id).Scan(&raw)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("record not found")
 		}
 		return nil, err
@@ -371,7 +374,7 @@ func (b *Builder) Update(ctx context.Context, id string, record map[string]any) 
 
 	var raw json.RawMessage
 	if err := b.db.QueryRow(ctx, sql, values...).Scan(&raw); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("record not found")
 		}
 		return nil, fmt.Errorf("update record: %w", err)

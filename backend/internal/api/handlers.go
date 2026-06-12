@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gresbase/gresbase/internal/api/middleware"
@@ -70,7 +71,8 @@ func writeInternalError(w http.ResponseWriter, context string, err error) {
 }
 
 func writeValidationError(w http.ResponseWriter, err error) {
-	if verr, ok := err.(forms.Errors); ok {
+	var verr forms.Errors
+	if errors.As(err, &verr) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"code":    http.StatusBadRequest,
 			"message": "validation failed",

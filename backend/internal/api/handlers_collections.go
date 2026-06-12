@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -67,7 +68,8 @@ func (h *Handlers) CollectionsCreate(w http.ResponseWriter, r *http.Request) {
 		coll = eventForm.Collection
 		return h.app.Collections().CreateCollection(r.Context(), &coll)
 	}); err != nil {
-		if _, ok := err.(forms.Errors); ok {
+		var verr forms.Errors
+		if errors.As(err, &verr) {
 			writeValidationError(w, err)
 			return
 		}
@@ -129,7 +131,8 @@ func (h *Handlers) CollectionsUpdate(w http.ResponseWriter, r *http.Request) {
 		coll = eventForm.Collection
 		return h.app.Collections().UpdateCollection(r.Context(), &coll)
 	}); err != nil {
-		if _, ok := err.(forms.Errors); ok {
+		var verr forms.Errors
+		if errors.As(err, &verr) {
 			writeValidationError(w, err)
 			return
 		}

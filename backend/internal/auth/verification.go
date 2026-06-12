@@ -2,9 +2,9 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -119,9 +119,12 @@ func (s *VerificationService) RequestPasswordReset(ctx context.Context, email st
 		"SELECT id, email FROM _admins WHERE email = $1", email,
 	).Scan(&adminID, &adminEmail)
 	if err != nil {
-		// Return success even if email not found (prevent enumeration)
-		log.Debug().Str("email", email).Msg("Password reset requested for unknown email")
-		return nil
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Return success even if email not found (prevent enumeration).
+			log.Debug().Str("email", email).Msg("Password reset requested for unknown email")
+			return nil
+		}
+		return err
 	}
 
 	token := generateSecureToken()
@@ -263,8 +266,11 @@ func (s *VerificationService) RequestMagicLink(ctx context.Context, email string
 		"SELECT id, email FROM _admins WHERE email = $1", email,
 	).Scan(&adminID, &adminEmail)
 	if err != nil {
-		// Don't reveal user doesn't exist
-		return nil
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Don't reveal user doesn't exist.
+			return nil
+		}
+		return err
 	}
 
 	token := generateSecureToken()
@@ -325,8 +331,11 @@ func (s *VerificationService) RequestOTP(ctx context.Context, email string) erro
 		"SELECT id FROM _admins WHERE email = $1", email,
 	).Scan(&adminID)
 	if err != nil {
-		// Don't reveal
-		return nil
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Don't reveal user doesn't exist.
+			return nil
+		}
+		return err
 	}
 
 	code := generateNumericCode(6)
@@ -383,7 +392,7 @@ func (s *VerificationService) VerifyOTP(ctx context.Context, email, code string)
 
 func generateSecureToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	mustRandRead(b)
 	return hex.EncodeToString(b)
 }
 
@@ -394,17 +403,17 @@ func hashToken(token string) string {
 
 func generateID16() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	mustRandRead(b)
 	return hex.EncodeToString(b)
 }
 
 func generateNumericCode(digits int) string {
-	b := make([]byte, digits)
 	const numbers = "0123456789"
-	for i := range b {
-		rb := make([]byte, 1)
-		rand.Read(rb)
-		b[i] = numbers[int(rb[0])%len(numbers)]
+	raw := make([]byte, digits)
+	mustRandRead(raw)
+	b := make([]byte, digits)
+	for i, v := range raw {
+		b[i] = numbers[int(v)%len(numbers)]
 	}
 	return string(b)
 }

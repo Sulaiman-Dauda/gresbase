@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -963,13 +962,13 @@ func (s *OAuthService) EnsureTable(ctx context.Context) error {
 
 func generateOAuthRandomString(length int) string {
 	b := make([]byte, length)
-	rand.Read(b)
+	mustRandRead(b)
 	return base64.RawURLEncoding.EncodeToString(b)[:length]
 }
 
 func generateCodeVerifier() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	mustRandRead(b)
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 

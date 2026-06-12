@@ -2,6 +2,7 @@ package storage_test
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,12 +33,12 @@ func TestLocalStoragePutGetDelete(t *testing.T) {
 	}
 
 	// Check exists
-	if !svc.FileExists(nil, path) {
+	if !svc.FileExists(context.TODO(), path) {
 		t.Error("File should exist after put")
 	}
 
 	// Read
-	got, info, err := svc.Download(nil, path)
+	got, info, err := svc.Download(context.TODO(), path)
 	if err != nil {
 		t.Fatalf("Failed to download: %v", err)
 	}
@@ -50,11 +51,11 @@ func TestLocalStoragePutGetDelete(t *testing.T) {
 	}
 
 	// Delete
-	if err := svc.Delete(nil, path); err != nil {
+	if err := svc.Delete(context.TODO(), path); err != nil {
 		t.Fatalf("Failed to delete: %v", err)
 	}
 
-	if svc.FileExists(nil, path) {
+	if svc.FileExists(context.TODO(), path) {
 		t.Error("File should not exist after delete")
 	}
 }
@@ -115,7 +116,7 @@ func TestFileInfoMetadata(t *testing.T) {
 	path := "meta/test.txt"
 	svc.PutTest(path, data)
 
-	_, info, err := svc.Download(nil, path)
+	_, info, err := svc.Download(context.TODO(), path)
 	if err != nil {
 		t.Fatal(err)
 	}

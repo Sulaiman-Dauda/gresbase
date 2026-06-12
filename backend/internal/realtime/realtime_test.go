@@ -517,15 +517,6 @@ func (m *mockClient) Close() {
 	m.closed.Store(true)
 }
 
-// withTimeout is a helper for tests
-func withTimeout(d time.Duration) (chan struct{}, func()) {
-	ch := make(chan struct{})
-	timer := time.AfterFunc(d, func() {
-		close(ch)
-	})
-	return ch, func() { timer.Stop() }
-}
-
 // Add subscription request handling to the hub for tests
 func (h *Hub) handleSubscriptionRequest(client Client, data []byte) {
 	var req SubscribeRequest

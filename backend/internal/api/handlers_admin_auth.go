@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -535,7 +536,8 @@ func (h *Handlers) AdminUpdateMe(w http.ResponseWriter, r *http.Request) {
 		admin, lookupErr = h.app.Auth().FindAdminByID(r.Context(), adminID)
 		return lookupErr
 	}); err != nil {
-		if _, ok := err.(forms.Errors); ok {
+		var verr forms.Errors
+		if errors.As(err, &verr) {
 			writeValidationError(w, err)
 			return
 		}
@@ -599,7 +601,8 @@ func (h *Handlers) AdminCreate(w http.ResponseWriter, r *http.Request) {
 		admin, err = h.app.Auth().CreateAdmin(r.Context(), createForm.Email, createForm.Password, createForm.Role)
 		return err
 	}); err != nil {
-		if _, ok := err.(forms.Errors); ok {
+		var verr forms.Errors
+		if errors.As(err, &verr) {
 			writeValidationError(w, err)
 			return
 		}
@@ -674,7 +677,8 @@ func (h *Handlers) AdminUpdate(w http.ResponseWriter, r *http.Request) {
 		admin, lookupErr = h.app.Auth().FindAdminByID(r.Context(), id)
 		return lookupErr
 	}); err != nil {
-		if _, ok := err.(forms.Errors); ok {
+		var verr forms.Errors
+		if errors.As(err, &verr) {
 			writeValidationError(w, err)
 			return
 		}

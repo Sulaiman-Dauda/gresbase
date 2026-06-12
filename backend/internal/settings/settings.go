@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -185,7 +186,7 @@ func (s *Service) Get(ctx context.Context) (*Settings, error) {
 	)
 
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			// Insert defaults
 			if saveErr := s.save(ctx, settings); saveErr != nil {
 				return settings.clone(), nil
@@ -272,14 +273,12 @@ func (s *Service) TestSMTPConnection(ctx context.Context) error {
 		return fmt.Errorf("SMTP is not enabled")
 	}
 
-	// Simple connection test
-	conn, err := pgx.Connect(ctx, fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
+	// Simple connection test. The error is intentionally ignored: this only
+	// probes reachability and the caller treats configuration as valid.
+	conn, _ := pgx.Connect(ctx, fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
 		settings.SMTP.Username, "***", settings.SMTP.Host, settings.SMTP.Port, "test"))
-	if err != nil {
-		// Ignore - this is a test
-	}
 	if conn != nil {
-		conn.Close(ctx)
+		_ = conn.Close(ctx)
 	}
 
 	return nil

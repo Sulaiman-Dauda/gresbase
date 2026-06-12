@@ -412,7 +412,7 @@ func WriteFile(dir, slug string, mf *MigrationFile) (string, error) {
 			ts++
 			continue
 		}
-		if err := os.WriteFile(path, data, 0o644); err != nil {
+		if err := os.WriteFile(path, data, 0o600); err != nil {
 			return "", err
 		}
 		return filename, nil

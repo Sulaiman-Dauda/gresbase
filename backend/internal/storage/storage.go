@@ -13,7 +13,6 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,7 +25,6 @@ type Service struct {
 	cfg      *config.Config
 	local    *LocalStorage
 	s3       *S3Storage
-	mu       sync.RWMutex
 	thumbSem chan struct{}
 }
 
@@ -405,10 +403,10 @@ func (l *LocalStorage) Ensure() error {
 
 func (l *LocalStorage) Put(path string, data []byte) error {
 	fullPath := filepath.Join(l.basePath, path)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
-	return os.WriteFile(fullPath, data, 0644)
+	return os.WriteFile(fullPath, data, 0o600)
 }
 
 func (l *LocalStorage) Get(path string) ([]byte, *FileInfo, error) {

@@ -12,7 +12,6 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -564,7 +563,7 @@ func (ras *RecordAuthService) linkOAuthRecord(ctx context.Context, recordID, col
 func (ras *RecordAuthService) rowToMap(fields []pgconn.FieldDescription, values []any) map[string]any {
 	m := make(map[string]any, len(fields))
 	for i, f := range fields {
-		m[string(f.Name)] = values[i]
+		m[f.Name] = values[i]
 	}
 	return m
 }
@@ -786,6 +785,6 @@ func (ras *RecordAuthService) ConfirmRecordEmailChange(ctx context.Context, toke
 
 func generateToken(length int) string {
 	b := make([]byte, length)
-	rand.Read(b)
+	mustRandRead(b)
 	return base64.RawURLEncoding.EncodeToString(b)[:length]
 }

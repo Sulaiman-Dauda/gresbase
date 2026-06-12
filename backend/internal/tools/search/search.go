@@ -172,7 +172,7 @@ func (p *Provider) Search(ctx context.Context, q SearchQuery) ([]SearchResult, i
 		var headline string
 
 		for i, col := range cols {
-			name := string(col.Name)
+			name := col.Name
 			switch name {
 			case "_rank":
 				if v, ok := vals[i].(float64); ok {

@@ -28,8 +28,7 @@ type Job struct {
 	UpdatedAt time.Time  `json:"updated_at"`
 
 	// Runtime fields
-	schedule  *cron.Schedule
-	handlerFn func(ctx context.Context, data map[string]any) error
+	schedule *cron.Schedule
 }
 
 // Scheduler manages cron jobs with database persistence.

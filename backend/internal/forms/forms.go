@@ -2,6 +2,7 @@ package forms
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -672,7 +673,8 @@ func (f *BatchPayloadForm) Validate() error {
 	}
 	for i := range f.Requests {
 		if err := f.Requests[i].Validate(); err != nil {
-			if verr, ok := err.(Errors); ok {
+			var verr Errors
+			if errors.As(err, &verr) {
 				for field, message := range verr {
 					errs.Add(fmt.Sprintf("requests.%d.%s", i, field), message)
 				}

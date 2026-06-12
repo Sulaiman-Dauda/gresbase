@@ -340,7 +340,7 @@ func extractBinary(zipPath, binName, destDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid zip archive: %w", err)
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 
 	var entry *zip.File
 	for _, f := range zr.File {
@@ -357,23 +357,31 @@ func extractBinary(zipPath, binName, destDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	tmp, err := os.CreateTemp(destDir, ".gresbase-new-*")
 	if err != nil {
 		return "", err
 	}
-	if _, err := io.Copy(tmp, src); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
+	// Guard against a decompression bomb: cap the extracted binary size. 500 MiB
+	// is far above any real Gresbase binary while bounding worst-case disk use.
+	const maxBinarySize = 500 << 20
+	if _, err := io.Copy(tmp, io.LimitReader(src, maxBinarySize+1)); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
 		return "", err
 	}
+	if fi, statErr := tmp.Stat(); statErr == nil && fi.Size() > maxBinarySize {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return "", fmt.Errorf("extracted binary exceeds maximum size of %d bytes", maxBinarySize)
+	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
+		_ = os.Remove(tmp.Name()) // best-effort cleanup of partial temp file
 		return "", err
 	}
 	if err := os.Chmod(tmp.Name(), 0o755); err != nil {
-		os.Remove(tmp.Name())
+		_ = os.Remove(tmp.Name()) // best-effort cleanup of partial temp file
 		return "", err
 	}
 	return tmp.Name(), nil
@@ -398,7 +406,7 @@ func replaceExecutable(exePath, newPath string) error {
 	if err := os.Rename(newPath, exePath); err != nil {
 		// Roll the backup back so the original binary keeps working.
 		if rbErr := os.Rename(bakPath, exePath); rbErr != nil {
-			return fmt.Errorf("failed to install the new binary (%v) AND failed to roll back the backup (%v); your binary is at %s", err, rbErr, bakPath)
+			return fmt.Errorf("failed to install the new binary (%w) AND failed to roll back the backup (%w); your binary is at %s", err, rbErr, bakPath)
 		}
 		return fmt.Errorf("failed to install the new binary (rolled back): %w", err)
 	}

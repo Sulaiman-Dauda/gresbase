@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gresbase/gresbase/internal/app"
 	"github.com/gresbase/gresbase/internal/auth"
+	"github.com/gresbase/gresbase/internal/ctxkeys"
 )
 
 // CSRFCookieName is the readable (non-HttpOnly) double-submit CSRF cookie.
@@ -95,15 +96,16 @@ func isSafeMethod(method string) bool {
 	}
 }
 
-// Context keys shared with handlers.
+// Context keys shared with handlers. These alias the typed keys in the ctxkeys
+// package so handlers can keep referencing middleware.CtxAdminID etc.
 const (
-	CtxAdminID           = "admin_id"
-	CtxAdminRole         = "admin_role"
-	CtxAdminEmail        = "admin_email"
-	CtxRequestID         = "request_id"
-	CtxAdminAuthMethod   = "admin_auth_method"
-	CtxAPIKeyID          = "api_key_id"
-	CtxAPIKeyPermissions = "api_key_permissions"
+	CtxAdminID           = ctxkeys.AdminID
+	CtxAdminRole         = ctxkeys.AdminRole
+	CtxAdminEmail        = ctxkeys.AdminEmail
+	CtxRequestID         = ctxkeys.RequestID
+	CtxAdminAuthMethod   = ctxkeys.AdminAuthMethod
+	CtxAPIKeyID          = ctxkeys.APIKeyID
+	CtxAPIKeyPermissions = ctxkeys.APIKeyPerms
 )
 
 // Middleware holds a reference to the app for auth validation.
@@ -210,11 +212,11 @@ func (mw *Middleware) OptionalAuth(next http.Handler) http.Handler {
 			if recordAuthSvc != nil {
 				recordClaims, err := recordAuthSvc.ValidateRecordToken(token)
 				if err == nil {
-					ctx = context.WithValue(ctx, "record_id", recordClaims.RecordID)
-					ctx = context.WithValue(ctx, "collection_id", recordClaims.CollectionID)
-					ctx = context.WithValue(ctx, "email", recordClaims.Email)
-					ctx = context.WithValue(ctx, "verified", recordClaims.Verified)
-					ctx = context.WithValue(ctx, "anonymous", recordClaims.Anonymous)
+					ctx = context.WithValue(ctx, ctxkeys.RecordID, recordClaims.RecordID)
+					ctx = context.WithValue(ctx, ctxkeys.CollectionID, recordClaims.CollectionID)
+					ctx = context.WithValue(ctx, ctxkeys.Email, recordClaims.Email)
+					ctx = context.WithValue(ctx, ctxkeys.Verified, recordClaims.Verified)
+					ctx = context.WithValue(ctx, ctxkeys.Anonymous, recordClaims.Anonymous)
 					r = r.WithContext(ctx)
 				}
 			}

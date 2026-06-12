@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -12,6 +13,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
+
+// safeInt32 clamps an int to the int32 range so the conversion used for pgx
+// pool sizing cannot overflow regardless of misconfiguration.
+func safeInt32(v int) int32 {
+	switch {
+	case v > math.MaxInt32:
+		return math.MaxInt32
+	case v < math.MinInt32:
+		return math.MinInt32
+	default:
+		return int32(v)
+	}
+}
 
 // DB wraps the PostgreSQL connection pool.
 type DB struct {
@@ -76,8 +90,8 @@ func New(cfg *config.Config) (*DB, error) {
 		return nil, fmt.Errorf("failed to parse database URL: %w", err)
 	}
 
-	poolCfg.MaxConns = int32(cfg.DatabaseMaxOpenConns)
-	poolCfg.MinConns = int32(cfg.DatabaseMaxIdleConns)
+	poolCfg.MaxConns = safeInt32(cfg.DatabaseMaxOpenConns)
+	poolCfg.MinConns = safeInt32(cfg.DatabaseMaxIdleConns)
 	poolCfg.MaxConnIdleTime = cfg.DatabaseMaxIdleTime
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -130,8 +144,8 @@ func newReplicaPool(cfg *config.Config) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse replica URL: %w", err)
 	}
-	poolCfg.MaxConns = int32(cfg.DatabaseMaxOpenConns)
-	poolCfg.MinConns = int32(cfg.DatabaseMaxIdleConns)
+	poolCfg.MaxConns = safeInt32(cfg.DatabaseMaxOpenConns)
+	poolCfg.MinConns = safeInt32(cfg.DatabaseMaxIdleConns)
 	poolCfg.MaxConnIdleTime = cfg.DatabaseMaxIdleTime
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

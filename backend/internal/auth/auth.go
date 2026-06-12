@@ -207,8 +207,9 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, st
 		admin, err = s.FindAdminByEmail(txCtx, email)
 		if err != nil {
 			// Anti-enumeration: perform a dummy bcrypt comparison so the
-			// response timing does not reveal whether the email exists.
-			bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
+			// response timing does not reveal whether the email exists. The
+			// result is intentionally discarded — we always fail this branch.
+			_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
 			return fmt.Errorf("invalid credentials")
 		}
 
@@ -530,7 +531,9 @@ func (s *Service) VerifyOTP(ctx context.Context, otpID, code string) (*AdminUser
 	}
 
 	if time.Now().After(expiresAt) {
-		s.exec(ctx, "DELETE FROM _otp WHERE id = $1", otpID)
+		if _, err := s.exec(ctx, "DELETE FROM _otp WHERE id = $1", otpID); err != nil {
+			log.Warn().Err(err).Msg("failed to delete expired OTP")
+		}
 		return nil, fmt.Errorf("OTP expired")
 	}
 
@@ -539,7 +542,9 @@ func (s *Service) VerifyOTP(ctx context.Context, otpID, code string) (*AdminUser
 	}
 
 	// Delete used OTP
-	s.exec(ctx, "DELETE FROM _otp WHERE id = $1", otpID)
+	if _, err := s.exec(ctx, "DELETE FROM _otp WHERE id = $1", otpID); err != nil {
+		log.Warn().Err(err).Msg("failed to delete used OTP")
+	}
 
 	return s.FindAdminByID(ctx, adminID)
 }
@@ -589,7 +594,9 @@ func (s *Service) VerifyMagicLink(ctx context.Context, token string) (*AdminUser
 	}
 
 	// Delete all tokens for this admin (single-use + cleanup)
-	s.exec(ctx, "DELETE FROM _magic_links WHERE admin_id = $1", adminID)
+	if _, err := s.exec(ctx, "DELETE FROM _magic_links WHERE admin_id = $1", adminID); err != nil {
+		log.Warn().Err(err).Msg("failed to delete used magic links")
+	}
 	return s.FindAdminByID(ctx, adminID)
 }
 
@@ -742,10 +749,19 @@ func (s *Service) ConfirmEmailChange(ctx context.Context, token string) error {
 	})
 }
 
+// mustRandRead fills b with cryptographically secure random bytes. crypto/rand
+// only fails on a broken entropy source, which is unrecoverable; panicking is
+// safer than emitting a predictable token, secret, or ID.
+func mustRandRead(b []byte) {
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+}
+
 // generateRandomString creates a random string of the given length.
 func generateRandomString(length int) string {
 	b := make([]byte, length)
-	rand.Read(b)
+	mustRandRead(b)
 	return base64.RawURLEncoding.EncodeToString(b)[:length]
 }
 
@@ -766,9 +782,11 @@ func (s *Service) FindOrCreateByOAuth(ctx context.Context, oauthUser *OAuthUserI
 		admin, err := s.FindAdminByEmail(ctx, oauthUser.Email)
 		if err == nil {
 			// Link OAuth to existing admin
-			s.exec(ctx,
+			if _, execErr := s.exec(ctx,
 				`INSERT INTO _external_auths (admin_id, provider, provider_id, data) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-				admin.ID, oauthUser.Provider, oauthUser.ProviderID, string(oauthUser.RawJSON))
+				admin.ID, oauthUser.Provider, oauthUser.ProviderID, string(oauthUser.RawJSON)); execErr != nil {
+				log.Warn().Err(execErr).Str("provider", oauthUser.Provider).Msg("failed to link OAuth identity to existing admin")
+			}
 			return admin, nil
 		}
 	}
@@ -1022,11 +1040,11 @@ type OTPRecord struct {
 
 // InvalidateAllTokens removes all active tokens for an admin (magic links, OTPs, resets, etc.)
 func (s *Service) InvalidateAllTokens(ctx context.Context, adminID string) {
-	s.exec(ctx, "DELETE FROM _magic_links WHERE admin_id = $1", adminID)
-	s.exec(ctx, "DELETE FROM _otp WHERE admin_id = $1", adminID)
-	s.exec(ctx, "DELETE FROM _password_resets WHERE admin_id = $1", adminID)
-	s.exec(ctx, "DELETE FROM _verifications WHERE admin_id = $1", adminID)
-	s.exec(ctx, "DELETE FROM _email_changes WHERE admin_id = $1", adminID)
+	for _, table := range []string{"_magic_links", "_otp", "_password_resets", "_verifications", "_email_changes"} {
+		if _, err := s.exec(ctx, "DELETE FROM "+table+" WHERE admin_id = $1", adminID); err != nil {
+			log.Warn().Err(err).Str("table", table).Str("admin_id", adminID).Msg("failed to invalidate tokens")
+		}
+	}
 }
 
 // RateLimitAuthRequest checks if a request exceeds rate limits for auth endpoints.
@@ -1038,7 +1056,9 @@ func (s *Service) RateLimitAuthRequest(ctx context.Context, action, identifier s
 		 WHERE key = $1 AND window_start > $2`,
 		"auth:"+action+":"+identifier, time.Now().Add(-window)).Scan(&count)
 	if err != nil {
-		return nil // Don't block on DB errors
+		// Fail open: don't block legitimate auth requests on a transient DB error.
+		log.Warn().Err(err).Str("action", action).Msg("rate limit check failed; allowing request")
+		return nil
 	}
 
 	if count >= maxPerWindow {

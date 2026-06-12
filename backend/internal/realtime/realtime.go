@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/gresbase/gresbase/internal/ctxkeys"
 	"github.com/rs/zerolog/log"
 )
 
@@ -349,10 +350,11 @@ type Hub struct {
 	// degrades, so the API path resumes automatically.
 	directSuppressed atomic.Bool
 
-	mu     sync.RWMutex
-	ctx    context.Context
-	cancel context.CancelFunc
-	stats  HubStats
+	mu      sync.RWMutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	runDone chan struct{} // closed when Run() returns
+	stats   HubStats
 
 	// Transactional dryCache support
 	transactions map[string]*TransactionContext
@@ -402,6 +404,7 @@ func NewHub() *Hub {
 		maxMessageSize: DefaultMaxMessageSize,
 		ctx:            ctx,
 		cancel:         cancel,
+		runDone:        make(chan struct{}),
 	}
 }
 
@@ -517,16 +520,16 @@ func authInfoFromContext(ctx context.Context) *AuthInfo {
 	if ctx == nil {
 		return nil
 	}
-	if adminID, _ := ctx.Value("admin_id").(string); adminID != "" {
-		email, _ := ctx.Value("admin_email").(string)
-		role, _ := ctx.Value("admin_role").(string)
+	if adminID, _ := ctx.Value(ctxkeys.AdminID).(string); adminID != "" {
+		email, _ := ctx.Value(ctxkeys.AdminEmail).(string)
+		role, _ := ctx.Value(ctxkeys.AdminRole).(string)
 		return &AuthInfo{AdminID: adminID, Email: email, Role: role, Verified: true}
 	}
-	if recordID, _ := ctx.Value("record_id").(string); recordID != "" {
-		collectionID, _ := ctx.Value("collection_id").(string)
-		email, _ := ctx.Value("email").(string)
-		verified, _ := ctx.Value("verified").(bool)
-		anonymous, _ := ctx.Value("anonymous").(bool)
+	if recordID, _ := ctx.Value(ctxkeys.RecordID).(string); recordID != "" {
+		collectionID, _ := ctx.Value(ctxkeys.CollectionID).(string)
+		email, _ := ctx.Value(ctxkeys.Email).(string)
+		verified, _ := ctx.Value(ctxkeys.Verified).(bool)
+		anonymous, _ := ctx.Value(ctxkeys.Anonymous).(bool)
 		return &AuthInfo{RecordID: recordID, Collection: collectionID, Email: email, Verified: verified, Anonymous: anonymous}
 	}
 	return nil
@@ -629,6 +632,11 @@ func normalizeSubscriptions(subscriptions []string) []string {
 
 // Run starts the hub event loop. Must be called in a goroutine.
 func (h *Hub) Run() {
+	// Signal Shutdown() once the loop has actually exited, so the goroutine's
+	// lifecycle is deterministic and it cannot keep logging/working after
+	// Shutdown returns.
+	defer close(h.runDone)
+
 	// Start stale connection cleanup ticker
 	cleanupTicker := time.NewTicker(30 * time.Second)
 	defer cleanupTicker.Stop()
@@ -1017,6 +1025,13 @@ func (h *Hub) RollbackTransaction(tx *TransactionContext) {
 func (h *Hub) Shutdown() {
 	log.Info().Msg("Shutting down realtime hub...")
 	h.cancel()
+
+	// Wait for Run() to actually exit so no hub goroutine outlives Shutdown
+	// (bounded, so a stuck loop can never hang teardown).
+	select {
+	case <-h.runDone:
+	case <-time.After(5 * time.Second):
+	}
 
 	h.mu.Lock()
 	clients := make([]Client, 0, len(h.clients))

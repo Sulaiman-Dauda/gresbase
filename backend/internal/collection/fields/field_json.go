@@ -57,11 +57,11 @@ func (f *JSONField) Unmarshal(raw any) (any, error) {
 	case string:
 		return []byte(v), nil
 	default:
-		b, err := json.Marshal(v)
-		if err != nil {
-			return []byte("{}"), nil
+		// Best-effort: an unmarshalable value falls back to an empty JSON object.
+		if b, err := json.Marshal(v); err == nil {
+			return b, nil
 		}
-		return b, nil
+		return []byte("{}"), nil
 	}
 }
 

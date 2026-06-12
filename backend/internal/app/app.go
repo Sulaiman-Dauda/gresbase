@@ -599,6 +599,9 @@ func (app *App) registerBackupJob() {
 		if keep := app.cfg.BackupMaxKeep; keep > 0 {
 			backups, err := app.backupSvc.ListBackups()
 			if err != nil {
+				// Backup already succeeded; retention is best-effort, so don't
+				// fail the job — just log and skip pruning this run.
+				log.Warn().Err(err).Msg("backup retention: list failed; skipping prune")
 				return nil
 			}
 			auto := make([]*storage.BackupInfo, 0, len(backups))

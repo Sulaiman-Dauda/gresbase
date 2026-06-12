@@ -334,7 +334,7 @@ func (s *Service) VectorSearch(ctx context.Context, coll *Collection, opts Vecto
 		}
 		record := make(Record)
 		for i, fd := range fieldDescs {
-			record[string(fd.Name)] = values[i]
+			record[fd.Name] = values[i]
 		}
 		records = append(records, s.normalizeRecord(coll, record))
 	}

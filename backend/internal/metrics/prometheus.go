@@ -70,6 +70,13 @@ func (p *promWriter) gaugeInt(name, help string, v int64) {
 	p.sample(name, nil, strconv.FormatInt(v, 10))
 }
 
+// gaugeUint emits a gauge for an unsigned value, avoiding the uint64->int64
+// conversion (and its overflow risk) for metrics like memory byte counts.
+func (p *promWriter) gaugeUint(name, help string, v uint64) {
+	p.family(name, help, "gauge")
+	p.sample(name, nil, strconv.FormatUint(v, 10))
+}
+
 func (p *promWriter) counterInt(name, help string, v int64) {
 	p.family(name, help, "counter")
 	p.sample(name, nil, strconv.FormatInt(v, 10))
@@ -157,8 +164,8 @@ func (c *Collector) PrometheusHandler(version string) http.HandlerFunc {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 		p.gaugeInt("gresbase_goroutines", "Number of running goroutines.", int64(runtime.NumGoroutine()))
-		p.gaugeInt("gresbase_memory_alloc_bytes", "Bytes of allocated heap objects.", int64(m.Alloc))
-		p.gaugeInt("gresbase_memory_total_alloc_bytes", "Cumulative bytes allocated for heap objects.", int64(m.TotalAlloc))
+		p.gaugeUint("gresbase_memory_alloc_bytes", "Bytes of allocated heap objects.", m.Alloc)
+		p.gaugeUint("gresbase_memory_total_alloc_bytes", "Cumulative bytes allocated for heap objects.", m.TotalAlloc)
 		p.gaugeInt("gresbase_cpu_count", "Number of logical CPUs.", int64(runtime.NumCPU()))
 
 		w.Header().Set("Content-Type", prometheusContentType)

@@ -59,7 +59,6 @@ import (
 	"github.com/gresbase/gresbase/internal/buildinfo"
 	"github.com/gresbase/gresbase/internal/config"
 	"github.com/gresbase/gresbase/internal/events"
-	"github.com/gresbase/gresbase/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -278,19 +277,6 @@ func (gb *Gresbase) superuserCommand() *cobra.Command {
 	})
 
 	return cmd
-}
-
-func (gb *Gresbase) versionCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print version",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("Gresbase %s\n", Version)
-			fmt.Printf("  Build time: %s\n", BuildTime)
-			fmt.Printf("  Git commit: %s\n", GitCommit)
-			fmt.Printf("  Has frontend: %v\n", ui.HasEmbeddedFrontend)
-		},
-	}
 }
 
 func (gb *Gresbase) printBanner() {

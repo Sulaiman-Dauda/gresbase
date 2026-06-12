@@ -49,11 +49,12 @@ func (f *AutoDateField) Validate(raw any) (any, error) {
 	if raw == nil {
 		return time.Now(), nil
 	}
-	t, err := ParseDate(raw)
-	if err != nil {
-		return time.Now(), nil
+	// Autodate fields are system-generated; an unparseable provided value is
+	// intentionally replaced with the current time rather than rejected.
+	if t, err := ParseDate(raw); err == nil {
+		return t, nil
 	}
-	return t, nil
+	return time.Now(), nil
 }
 
 func (f *AutoDateField) Marshal(value any) (any, error) {

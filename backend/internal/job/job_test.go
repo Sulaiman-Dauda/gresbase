@@ -51,8 +51,9 @@ func TestSchedulerRegisterHandler(t *testing.T) {
 		return nil
 	})
 
-	if !called {
-		// Handler registration doesn't call it, just ensures no panic
+	// Registration must not invoke the handler.
+	if called {
+		t.Error("handler should not be called on registration")
 	}
 }
 

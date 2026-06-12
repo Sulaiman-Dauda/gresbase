@@ -15,6 +15,7 @@ package jsplugin
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -83,6 +84,22 @@ type ScriptPlugin struct {
 	compiled    *goja.Program
 	hooks       map[string]goja.Callable
 	modules     map[string]string // module name -> source code
+}
+
+// jsSetter is implemented by both *goja.Runtime and *goja.Object, whose Set
+// methods return an error only when the target is frozen/sealed — which never
+// happens for the freshly created VMs and objects we build the plugin API on.
+type jsSetter interface {
+	Set(name string, value any) error
+}
+
+// mustSet binds a value onto a goja runtime/object during API setup. A failure
+// here would mean the VM was constructed in an impossible state, so we log it
+// loudly rather than silently dropping the binding.
+func mustSet(target jsSetter, name string, value any) {
+	if err := target.Set(name, value); err != nil {
+		log.Error().Err(err).Str("binding", name).Msg("jsplugin: failed to bind VM property")
+	}
 }
 
 // NewRuntime creates a JS plugin runtime with an optional AppBridge.
@@ -174,8 +191,10 @@ func (r *Runtime) TriggerHook(hookName string, eventJSON []byte) error {
 		p.setupRuntime(r, vm)
 
 		var eventData map[string]any
-		json.Unmarshal(eventJSON, &eventData)
-		vm.Set("event", vm.ToValue(eventData))
+		if err := json.Unmarshal(eventJSON, &eventData); err != nil {
+			log.Warn().Err(err).Str("hook", hookName).Msg("JS hook: invalid event JSON; passing empty event")
+		}
+		mustSet(vm, "event", vm.ToValue(eventData))
 
 		if err := r.runWithTimeout(vm, func() error {
 			_, err := fn(goja.Undefined(), vm.ToValue(eventData))
@@ -216,24 +235,24 @@ func (r *Runtime) ListPlugins() []map[string]any {
 func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	// ---- Console ----
 	console := vm.NewObject()
-	console.Set("log", jsConsoleLog)
-	console.Set("error", jsConsoleError)
-	console.Set("warn", jsConsoleWarn)
-	console.Set("debug", jsConsoleDebug)
-	console.Set("info", jsConsoleLog)
-	vm.Set("console", console)
+	mustSet(console, "log", jsConsoleLog)
+	mustSet(console, "error", jsConsoleError)
+	mustSet(console, "warn", jsConsoleWarn)
+	mustSet(console, "debug", jsConsoleDebug)
+	mustSet(console, "info", jsConsoleLog)
+	mustSet(vm, "console", console)
 
 	// ---- $app ----
 	appObj := vm.NewObject()
-	appObj.Set("version", "0.1.0")
-	appObj.Set("isDev", false)
+	mustSet(appObj, "version", "0.1.0")
+	mustSet(appObj, "isDev", false)
 
 	// $app.db() - returns a query builder
-	appObj.Set("db", func() goja.Value {
+	mustSet(appObj, "db", func() goja.Value {
 		dbObj := vm.NewObject()
 
 		// db.select('*').from('table').where('id = ?', 1).all()
-		dbObj.Set("select", func(call goja.FunctionCall) goja.Value {
+		mustSet(dbObj, "select", func(call goja.FunctionCall) goja.Value {
 			fields := "*"
 			if len(call.Arguments) > 0 {
 				fields = call.Arguments[0].String()
@@ -245,7 +264,7 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// $app.findRecordById(collectionNameOrId, id)
-	appObj.Set("findRecordById", func(call goja.FunctionCall) goja.Value {
+	mustSet(appObj, "findRecordById", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 || rt.app == nil {
 			return goja.Null()
 		}
@@ -258,7 +277,7 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// $app.findRecordsByFilter(collection, filter, sort, limit, offset)
-	appObj.Set("findRecordsByFilter", func(call goja.FunctionCall) goja.Value {
+	mustSet(appObj, "findRecordsByFilter", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 || rt.app == nil {
 			return vm.ToValue([]any{})
 		}
@@ -288,7 +307,7 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// $app.findCollectionByNameOrId(nameOrId)
-	appObj.Set("findCollectionByNameOrId", func(call goja.FunctionCall) goja.Value {
+	mustSet(appObj, "findCollectionByNameOrId", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 || rt.app == nil {
 			return goja.Null()
 		}
@@ -300,7 +319,7 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// $app.findAdminById(id)
-	appObj.Set("findAdminById", func(call goja.FunctionCall) goja.Value {
+	mustSet(appObj, "findAdminById", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 || rt.app == nil {
 			return goja.Null()
 		}
@@ -312,7 +331,7 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// $app.sendMail(to, subject, htmlBody)
-	appObj.Set("sendMail", func(call goja.FunctionCall) goja.Value {
+	mustSet(appObj, "sendMail", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 3 || rt.app == nil {
 			return vm.ToValue(false)
 		}
@@ -325,7 +344,7 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// $app.settings()
-	appObj.Set("settings", func(call goja.FunctionCall) goja.Value {
+	mustSet(appObj, "settings", func(call goja.FunctionCall) goja.Value {
 		if rt.app == nil {
 			return vm.ToValue(map[string]any{})
 		}
@@ -337,7 +356,7 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// $app.logAudit(adminId, action, resource, resourceId, data)
-	appObj.Set("logAudit", func(call goja.FunctionCall) goja.Value {
+	mustSet(appObj, "logAudit", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 4 || rt.app == nil {
 			return goja.Null()
 		}
@@ -349,23 +368,25 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 				}
 			}
 		}
-		rt.app.LogAudit(
+		if err := rt.app.LogAudit(
 			call.Arguments[0].String(),
 			call.Arguments[1].String(),
 			call.Arguments[2].String(),
 			call.Arguments[3].String(),
 			data,
-		)
+		); err != nil {
+			log.Warn().Err(err).Msg("JS $app.logAudit failed")
+		}
 		return goja.Null()
 	})
 
-	vm.Set("$app", appObj)
+	mustSet(vm, "$app", appObj)
 
 	// ---- $http ----
 	httpObj := vm.NewObject()
 
 	// $http.send({ method: 'GET', url: '...', headers: {...}, body: '...' })
-	httpObj.Set("send", func(call goja.FunctionCall) goja.Value {
+	mustSet(httpObj, "send", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return vm.ToValue(map[string]any{"error": "missing request config"})
 		}
@@ -373,7 +394,7 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// $http.get(url)
-	httpObj.Set("get", func(call goja.FunctionCall) goja.Value {
+	mustSet(httpObj, "get", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return vm.ToValue(map[string]any{"error": "missing url"})
 		}
@@ -381,7 +402,7 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// $http.post(url, body)
-	httpObj.Set("post", func(call goja.FunctionCall) goja.Value {
+	mustSet(httpObj, "post", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return vm.ToValue(map[string]any{"error": "missing url"})
 		}
@@ -392,13 +413,13 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 		return p.jsHTTPQuick(vm, "POST", call.Arguments[0].String(), body)
 	})
 
-	vm.Set("$http", httpObj)
+	mustSet(vm, "$http", httpObj)
 
 	// ---- $os ----
 	osObj := vm.NewObject()
 
 	// $os.getenv(name)
-	osObj.Set("getenv", func(call goja.FunctionCall) goja.Value {
+	mustSet(osObj, "getenv", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return vm.ToValue("")
 		}
@@ -406,7 +427,7 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// $os.readFile(path)
-	osObj.Set("readFile", func(call goja.FunctionCall) goja.Value {
+	mustSet(osObj, "readFile", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return vm.ToValue("")
 		}
@@ -419,16 +440,16 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// $os.writeFile(path, content)
-	osObj.Set("writeFile", func(call goja.FunctionCall) goja.Value {
+	mustSet(osObj, "writeFile", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
 			return vm.ToValue(false)
 		}
-		err := os.WriteFile(call.Arguments[0].String(), []byte(call.Arguments[1].String()), 0644)
+		err := os.WriteFile(call.Arguments[0].String(), []byte(call.Arguments[1].String()), 0o600)
 		return vm.ToValue(err == nil)
 	})
 
 	// $os.exec(command, ...args)
-	osObj.Set("exec", func(call goja.FunctionCall) goja.Value {
+	mustSet(osObj, "exec", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return vm.ToValue(map[string]any{"error": "missing command"})
 		}
@@ -456,34 +477,34 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 		})
 	})
 
-	vm.Set("$os", osObj)
+	mustSet(vm, "$os", osObj)
 
 	// ---- $security ----
 	security := vm.NewObject()
-	security.Set("hash", func(call goja.FunctionCall) goja.Value {
+	mustSet(security, "hash", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) > 0 {
 			h := sha256.Sum256([]byte(call.Arguments[0].String()))
 			return vm.ToValue(hex.EncodeToString(h[:]))
 		}
 		return vm.ToValue("")
 	})
-	security.Set("randomUUID", func(call goja.FunctionCall) goja.Value {
+	mustSet(security, "randomUUID", func(call goja.FunctionCall) goja.Value {
 		return vm.ToValue(generateUUID())
 	})
-	security.Set("randomString", func(call goja.FunctionCall) goja.Value {
+	mustSet(security, "randomString", func(call goja.FunctionCall) goja.Value {
 		length := 32
 		if len(call.Arguments) > 0 {
 			length = int(call.Arguments[0].ToInteger())
 		}
 		return vm.ToValue(generateRandomString(length))
 	})
-	vm.Set("$security", security)
+	mustSet(vm, "$security", security)
 
 	// ---- $event (set dynamically per hook call) ----
-	vm.Set("$event", vm.ToValue(map[string]any{}))
+	mustSet(vm, "$event", vm.ToValue(map[string]any{}))
 
 	// ---- registerHook function ----
-	vm.Set("registerHook", func(call goja.FunctionCall) goja.Value {
+	mustSet(vm, "registerHook", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
 			log.Warn().Str("plugin", p.Name).Msg("registerHook called with insufficient args")
 			return goja.Undefined()
@@ -497,7 +518,7 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 	})
 
 	// ---- require() for module loading ----
-	vm.Set("require", func(call goja.FunctionCall) goja.Value {
+	mustSet(vm, "require", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return goja.Undefined()
 		}
@@ -505,26 +526,28 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 		if source, ok := p.modules[moduleName]; ok {
 			moduleVM := goja.New()
 			exports := moduleVM.NewObject()
-			moduleVM.Set("module", map[string]any{"exports": exports})
+			mustSet(moduleVM, "module", map[string]any{"exports": exports})
 			_, err := moduleVM.RunString(source)
 			if err != nil {
 				log.Error().Err(err).Str("module", moduleName).Msg("JS: require failed")
 				return goja.Undefined()
 			}
-			if exp := moduleVM.Get("module").(*goja.Object).Get("exports"); exp != nil {
-				return exp
+			if moduleObj, ok := moduleVM.Get("module").(*goja.Object); ok {
+				if exp := moduleObj.Get("exports"); exp != nil {
+					return exp
+				}
 			}
 		}
 		return goja.Undefined()
 	})
 
 	// ---- now() helper ----
-	vm.Set("now", func(call goja.FunctionCall) goja.Value {
+	mustSet(vm, "now", func(call goja.FunctionCall) goja.Value {
 		return vm.ToValue(time.Now().UTC().Format(time.RFC3339))
 	})
 
 	// ---- setTimeout / setInterval (limited) ----
-	vm.Set("setTimeout", func(call goja.FunctionCall) goja.Value {
+	mustSet(vm, "setTimeout", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
 			return goja.Undefined()
 		}
@@ -537,7 +560,9 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 				time.Sleep(delay)
 				newVM := goja.New()
 				p.setupRuntime(rt, newVM)
-				fn(goja.Undefined())
+				if _, err := fn(goja.Undefined()); err != nil {
+					log.Warn().Err(err).Msg("JS setTimeout callback failed")
+				}
 			}()
 		}
 		return goja.Undefined()
@@ -553,14 +578,14 @@ func (p *ScriptPlugin) createQueryBuilder(vm *goja.Runtime, rt *Runtime, baseSQL
 	var orderBy, groupBy, havingClause string
 	var limitVal, offsetVal int
 
-	qb.Set("from", func(call goja.FunctionCall) goja.Value {
+	mustSet(qb, "from", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) > 0 {
 			tableName = call.Arguments[0].String()
 		}
 		return qb
 	})
 
-	qb.Set("where", func(call goja.FunctionCall) goja.Value {
+	mustSet(qb, "where", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) > 0 {
 			whereClause = call.Arguments[0].String()
 			for i := 1; i < len(call.Arguments); i++ {
@@ -570,35 +595,35 @@ func (p *ScriptPlugin) createQueryBuilder(vm *goja.Runtime, rt *Runtime, baseSQL
 		return qb
 	})
 
-	qb.Set("orderBy", func(call goja.FunctionCall) goja.Value {
+	mustSet(qb, "orderBy", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) > 0 {
 			orderBy = call.Arguments[0].String()
 		}
 		return qb
 	})
 
-	qb.Set("groupBy", func(call goja.FunctionCall) goja.Value {
+	mustSet(qb, "groupBy", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) > 0 {
 			groupBy = call.Arguments[0].String()
 		}
 		return qb
 	})
 
-	qb.Set("having", func(call goja.FunctionCall) goja.Value {
+	mustSet(qb, "having", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) > 0 {
 			havingClause = call.Arguments[0].String()
 		}
 		return qb
 	})
 
-	qb.Set("limit", func(call goja.FunctionCall) goja.Value {
+	mustSet(qb, "limit", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) > 0 {
 			limitVal = int(call.Arguments[0].ToInteger())
 		}
 		return qb
 	})
 
-	qb.Set("offset", func(call goja.FunctionCall) goja.Value {
+	mustSet(qb, "offset", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) > 0 {
 			offsetVal = int(call.Arguments[0].ToInteger())
 		}
@@ -606,7 +631,7 @@ func (p *ScriptPlugin) createQueryBuilder(vm *goja.Runtime, rt *Runtime, baseSQL
 	})
 
 	// Execute and return all rows
-	qb.Set("all", func(call goja.FunctionCall) goja.Value {
+	mustSet(qb, "all", func(call goja.FunctionCall) goja.Value {
 		if rt.app == nil || tableName == "" {
 			return vm.ToValue([]any{})
 		}
@@ -638,7 +663,7 @@ func (p *ScriptPlugin) createQueryBuilder(vm *goja.Runtime, rt *Runtime, baseSQL
 	})
 
 	// Execute and return first row
-	qb.Set("one", func(call goja.FunctionCall) goja.Value {
+	mustSet(qb, "one", func(call goja.FunctionCall) goja.Value {
 		if rt.app == nil || tableName == "" {
 			return goja.Null()
 		}
@@ -655,7 +680,7 @@ func (p *ScriptPlugin) createQueryBuilder(vm *goja.Runtime, rt *Runtime, baseSQL
 	})
 
 	// Execute a raw query
-	qb.Set("exec", func(call goja.FunctionCall) goja.Value {
+	mustSet(qb, "exec", func(call goja.FunctionCall) goja.Value {
 		if rt.app == nil || tableName == "" {
 			return vm.ToValue(int64(0))
 		}
@@ -721,7 +746,7 @@ func (p *ScriptPlugin) jsHTTPSend(vm *goja.Runtime, configVal goja.Value) goja.V
 	if err != nil {
 		return vm.ToValue(map[string]any{"error": err.Error()})
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // response body drained below; close error not actionable
 
 	respBody, _ := io.ReadAll(resp.Body)
 
@@ -826,10 +851,18 @@ func generateUUID() string {
 
 func generateRandomString(length int) string {
 	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	if length <= 0 {
+		return ""
+	}
+	raw := make([]byte, length)
+	if _, err := cryptorand.Read(raw); err != nil {
+		// crypto/rand only fails on a broken entropy source, which is
+		// unrecoverable; panicking is safer than returning a predictable string.
+		panic(fmt.Sprintf("crypto/rand failed generating random string: %v", err))
+	}
 	b := make([]byte, length)
-	for i := range b {
-		b[i] = chars[time.Now().UnixNano()%int64(len(chars))]
-		time.Sleep(1) // crude entropy, replace with crypto/rand in production
+	for i, v := range raw {
+		b[i] = chars[int(v)%len(chars)]
 	}
 	return string(b)
 }

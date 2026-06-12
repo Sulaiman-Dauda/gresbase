@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gresbase/gresbase/internal/auth"
+	"github.com/gresbase/gresbase/internal/ctxkeys"
 	"github.com/gresbase/gresbase/internal/events"
 )
 
@@ -43,7 +44,7 @@ func (s *Server) mountPasskeyRoutes(r chi.Router, authRate func(http.Handler) ht
 // ok=false after writing the error response.
 func (h *Handlers) requireRecordAuthForCollection(w http.ResponseWriter, r *http.Request, collName string) (string, bool) {
 	recordID := getRecordIDFromContext(r)
-	tokenCollectionID, _ := r.Context().Value("collection_id").(string)
+	tokenCollectionID, _ := r.Context().Value(ctxkeys.CollectionID).(string)
 	if recordID == "" || tokenCollectionID == "" {
 		writeError(w, http.StatusUnauthorized, "Record authentication required")
 		return "", false

@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gresbase/gresbase/internal/auth"
+	"github.com/gresbase/gresbase/internal/ctxkeys"
 	"github.com/gresbase/gresbase/internal/events"
 	"github.com/gresbase/gresbase/internal/forms"
 	"github.com/gresbase/gresbase/internal/storage"
@@ -35,10 +36,10 @@ func (h *Handlers) FileDownload(w http.ResponseWriter, r *http.Request) {
 				ctx = context.WithValue(ctx, contextKeyAdminID, claims.AdminID)
 				ctx = context.WithValue(ctx, contextKeyAdminRole, claims.Role)
 			} else if claims.RecordID != "" {
-				ctx = context.WithValue(ctx, "record_id", claims.RecordID)
-				ctx = context.WithValue(ctx, "collection_id", claims.CollectionID)
-				ctx = context.WithValue(ctx, "email", claims.Email)
-				ctx = context.WithValue(ctx, "verified", claims.Verified)
+				ctx = context.WithValue(ctx, ctxkeys.RecordID, claims.RecordID)
+				ctx = context.WithValue(ctx, ctxkeys.CollectionID, claims.CollectionID)
+				ctx = context.WithValue(ctx, ctxkeys.Email, claims.Email)
+				ctx = context.WithValue(ctx, ctxkeys.Verified, claims.Verified)
 			}
 			r = r.WithContext(ctx)
 		}

@@ -67,7 +67,7 @@ func (h *Handlers) SQLExecute(w http.ResponseWriter, r *http.Request) {
 
 	columns := []string{}
 	for _, fd := range rows.FieldDescriptions() {
-		columns = append(columns, string(fd.Name))
+		columns = append(columns, fd.Name)
 	}
 
 	results := []map[string]any{}

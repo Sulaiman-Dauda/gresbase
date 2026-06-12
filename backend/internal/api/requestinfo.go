@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	apimw "github.com/gresbase/gresbase/internal/api/middleware"
+	"github.com/gresbase/gresbase/internal/ctxkeys"
 	"github.com/gresbase/gresbase/internal/events"
 )
 
@@ -52,20 +53,20 @@ func NewRequestInfo(r *http.Request) *RequestInfo {
 	if role, ok := r.Context().Value(apimw.CtxAdminRole).(string); ok {
 		info.Role = role
 	}
-	if email, ok := r.Context().Value("email").(string); ok {
+	if email, ok := r.Context().Value(ctxkeys.Email).(string); ok {
 		info.Email = email
 	}
-	if recordID, ok := r.Context().Value("record_id").(string); ok && recordID != "" {
+	if recordID, ok := r.Context().Value(ctxkeys.RecordID).(string); ok && recordID != "" {
 		info.IsRecordAuth = true
 		info.RecordID = recordID
 	}
-	if collectionID, ok := r.Context().Value("collection_id").(string); ok {
+	if collectionID, ok := r.Context().Value(ctxkeys.CollectionID).(string); ok {
 		info.CollectionID = collectionID
 	}
-	if verified, ok := r.Context().Value("verified").(bool); ok {
+	if verified, ok := r.Context().Value(ctxkeys.Verified).(bool); ok {
 		info.Verified = verified
 	}
-	if anonymous, ok := r.Context().Value("anonymous").(bool); ok {
+	if anonymous, ok := r.Context().Value(ctxkeys.Anonymous).(bool); ok {
 		info.Anonymous = anonymous
 	}
 

@@ -135,10 +135,10 @@ func ReadFileString(path string) (string, error) {
 
 // WriteFileString writes a string to a file.
 func WriteFileString(path, content string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(content), 0644)
+	return os.WriteFile(path, []byte(content), 0o600)
 }
 
 // SafePath ensures a path is within a base directory (prevents path traversal).
@@ -225,7 +225,7 @@ func Touch(path string) error {
 		_ = now
 		return os.Chtimes(path, time.Now(), time.Now())
 	}
-	return os.WriteFile(path, []byte{}, 0644)
+	return os.WriteFile(path, []byte{}, 0o600)
 }
 
 // Ensure io is used

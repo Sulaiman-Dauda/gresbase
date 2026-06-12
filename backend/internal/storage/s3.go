@@ -53,17 +53,8 @@ func NewS3Storage(cfg *config.Config) (*S3Storage, error) {
 
 // Put uploads a file to S3.
 func (s *S3Storage) Put(path string, data []byte, contentType string) error {
-	_, err := s.client.PutObject(context.Background(), s.bucket, path,
-		io.NopCloser(io.Reader(nil)), int64(len(data)), minio.PutObjectOptions{
-			ContentType: contentType,
-		})
-	// Actually write bytes
-	if err == nil || err.Error() == "" {
-		// Use the proper API
-	}
-	_ = contentType
 	reader := &bytesReader{data: data}
-	_, err = s.client.PutObject(context.Background(), s.bucket, path,
+	_, err := s.client.PutObject(context.Background(), s.bucket, path,
 		reader, int64(len(data)), minio.PutObjectOptions{
 			ContentType: contentType,
 		})
@@ -173,47 +164,6 @@ func (r *bytesReader) Read(p []byte) (int, error) {
 // -------------------------------------------------------------------
 // Service S3 integration
 // -------------------------------------------------------------------
-
-// uploadS3 stores a file via S3.
-func (s *Service) uploadS3(ctx context.Context, path string, data []byte, mimeType string) (*FileInfo, error) {
-	storage, err := NewS3Storage(s.cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := storage.Put(path, data, mimeType); err != nil {
-		return nil, err
-	}
-
-	signedURL, _ := storage.GetSignedURL(path, 24*time.Hour)
-
-	return &FileInfo{
-		Name:      filepath.Base(path),
-		Path:      path,
-		Size:      int64(len(data)),
-		MimeType:  mimeType,
-		CreatedAt: time.Now(),
-		URL:       signedURL,
-	}, nil
-}
-
-// downloadS3 retrieves a file from S3.
-func (s *Service) downloadS3(ctx context.Context, path string) ([]byte, *FileInfo, error) {
-	storage, err := NewS3Storage(s.cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	return storage.Get(path)
-}
-
-// deleteS3 removes a file from S3.
-func (s *Service) deleteS3(ctx context.Context, path string) error {
-	storage, err := NewS3Storage(s.cfg)
-	if err != nil {
-		return err
-	}
-	return storage.Delete(path)
-}
 
 // Ensure multipart import compiles
 var _ = multipart.FileHeader{}

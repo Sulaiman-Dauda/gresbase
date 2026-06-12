@@ -109,7 +109,7 @@ func (p *GoogleProvider) GetAuthURL(state, redirectURL string) (string, error) {
 
 func (p *GoogleProvider) ExchangeCode(ctx context.Context, code, redirectURL string) (*OAuthUserInfo, error) {
 	// Exchange the authorization code for a token
-	tokenURL := "https://oauth2.googleapis.com/token"
+	tokenURL := "https://oauth2.googleapis.com/token" //nolint:gosec // G101 false positive: public OAuth token endpoint URL, not a credential.
 	data := url.Values{
 		"client_id":     {p.clientID},
 		"client_secret": {p.clientSecret},
@@ -225,7 +225,7 @@ func (p *GithubProvider) GetAuthURL(state, redirectURL string) (string, error) {
 
 func (p *GithubProvider) ExchangeCode(ctx context.Context, code, redirectURL string) (*OAuthUserInfo, error) {
 	// Exchange code for token
-	tokenURL := "https://github.com/login/oauth/access_token"
+	tokenURL := "https://github.com/login/oauth/access_token" //nolint:gosec // G101 false positive: public OAuth token endpoint URL, not a credential.
 	data := url.Values{
 		"client_id":     {p.clientID},
 		"client_secret": {p.clientSecret},
@@ -610,7 +610,7 @@ func (p *DiscordProvider) GetAuthURL(state, redirectURL string) (string, error) 
 }
 
 func (p *DiscordProvider) ExchangeCode(ctx context.Context, code, redirectURL string) (*OAuthUserInfo, error) {
-	tokenURL := "https://discord.com/api/oauth2/token"
+	tokenURL := "https://discord.com/api/oauth2/token" //nolint:gosec // G101 false positive: public OAuth token endpoint URL, not a credential.
 	data := url.Values{
 		"client_id":     {p.clientID},
 		"client_secret": {p.clientSecret},

@@ -70,6 +70,15 @@ func selectEmbeddedVersion(dataPath string) (version embeddedpostgres.PostgresVe
 // well-tested embedded-postgres library. Unlike the previous approach,
 // this properly downloads pre-built PostgreSQL binaries per-platform,
 // manages lifecycle, and does NOT require sudo or system package managers.
+// safePort converts a configured TCP port to uint32, clamping to the valid
+// 1..65535 range so the conversion cannot overflow or yield an invalid port.
+func safePort(p int) uint32 {
+	if p < 1 || p > 65535 {
+		return 5433 // default embedded port
+	}
+	return uint32(p)
+}
+
 type EmbeddedPostgres struct {
 	mu        sync.Mutex
 	ep        *embeddedpostgres.EmbeddedPostgres
@@ -168,7 +177,7 @@ func (ep *EmbeddedPostgres) Start() error {
 	// library will create bin/ inside it with the postgres binary.
 	epCfg := embeddedpostgres.DefaultConfig().
 		Version(version).
-		Port(uint32(ep.port)).
+		Port(safePort(ep.port)).
 		Username(ep.user).
 		Password(ep.password).
 		Database(ep.dbName).

@@ -32,7 +32,7 @@ func hooksCommand(gb *gresbase.Gresbase) *cobra.Command {
 				if _, err := os.Stat(path); err == nil {
 					continue // never overwrite user files
 				}
-				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 					return fmt.Errorf("write %s: %w", path, err)
 				}
 				created++

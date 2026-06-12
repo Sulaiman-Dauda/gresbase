@@ -101,12 +101,3 @@ func (h *Handlers) RealtimeBroadcast(w http.ResponseWriter, r *http.Request) {
 	})
 	w.WriteHeader(204)
 }
-
-func realtimeMsg(event string, data any) realtime.RealtimeMessage {
-	payload, _ := json.Marshal(data)
-	return realtime.RealtimeMessage{
-		Event:     event,
-		Timestamp: time.Now().UnixMilli(),
-		Data:      payload,
-	}
-}

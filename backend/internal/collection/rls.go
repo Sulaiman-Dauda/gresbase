@@ -308,12 +308,6 @@ func compileRuleExpr(rule string) (sql string, unsupported []string, err error) 
 // Policy compilation
 // ---------------------------------------------------------------------------
 
-type rlsOpResult struct {
-	using       string // empty = clause not used by this operation
-	check       string
-	unsupported []string
-}
-
 func rlsPolicyName(collectionName, op string) string {
 	return "gresbase_" + collectionName + "_" + strings.ToLower(op)
 }

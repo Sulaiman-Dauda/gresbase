@@ -3,6 +3,7 @@ package collection
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -770,25 +771,25 @@ func TestViewCollectionsRejectWrites(t *testing.T) {
 	ctx := context.Background()
 	view := &Collection{Name: "v", Type: TypeView}
 
-	if _, err := svc.CreateRecord(ctx, view, map[string]any{"a": 1}); err != ErrViewReadOnly {
+	if _, err := svc.CreateRecord(ctx, view, map[string]any{"a": 1}); !errors.Is(err, ErrViewReadOnly) {
 		t.Errorf("CreateRecord = %v, want ErrViewReadOnly", err)
 	}
-	if _, err := svc.CreateRecords(ctx, view, []map[string]any{{"a": 1}}); err != ErrViewReadOnly {
+	if _, err := svc.CreateRecords(ctx, view, []map[string]any{{"a": 1}}); !errors.Is(err, ErrViewReadOnly) {
 		t.Errorf("CreateRecords = %v, want ErrViewReadOnly", err)
 	}
-	if _, err := svc.CreateBatch(ctx, view, []map[string]any{{"a": 1}}); err != ErrViewReadOnly {
+	if _, err := svc.CreateBatch(ctx, view, []map[string]any{{"a": 1}}); !errors.Is(err, ErrViewReadOnly) {
 		t.Errorf("CreateBatch = %v, want ErrViewReadOnly", err)
 	}
-	if err := svc.UpdateRecord(ctx, view, "id", map[string]any{"a": 1}); err != ErrViewReadOnly {
+	if err := svc.UpdateRecord(ctx, view, "id", map[string]any{"a": 1}); !errors.Is(err, ErrViewReadOnly) {
 		t.Errorf("UpdateRecord = %v, want ErrViewReadOnly", err)
 	}
-	if err := svc.DeleteRecord(ctx, view, "id"); err != ErrViewReadOnly {
+	if err := svc.DeleteRecord(ctx, view, "id"); !errors.Is(err, ErrViewReadOnly) {
 		t.Errorf("DeleteRecord = %v, want ErrViewReadOnly", err)
 	}
-	if err := svc.UpdateBatch(ctx, view, map[string]map[string]any{"id": {"a": 1}}); err != ErrViewReadOnly {
+	if err := svc.UpdateBatch(ctx, view, map[string]map[string]any{"id": {"a": 1}}); !errors.Is(err, ErrViewReadOnly) {
 		t.Errorf("UpdateBatch = %v, want ErrViewReadOnly", err)
 	}
-	if err := svc.DeleteBatch(ctx, view, []string{"id"}); err != ErrViewReadOnly {
+	if err := svc.DeleteBatch(ctx, view, []string{"id"}); !errors.Is(err, ErrViewReadOnly) {
 		t.Errorf("DeleteBatch = %v, want ErrViewReadOnly", err)
 	}
 }

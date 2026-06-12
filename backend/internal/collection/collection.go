@@ -428,10 +428,6 @@ func (s *Service) hydrateCollectionMetadata(ctx context.Context, coll *Collectio
 // View collections
 // ---------------------------------------------------------------------------
 
-func (s *Service) createView(ctx context.Context, coll *Collection) error {
-	return s.createViewWith(ctx, s.runnerForContext(ctx), coll)
-}
-
 func (s *Service) createViewWith(ctx context.Context, runner dbRunner, coll *Collection) error {
 	if coll.ViewQuery == "" {
 		return fmt.Errorf("view collection %q requires a view_query", coll.Name)
@@ -465,19 +461,11 @@ func (s *Service) RefreshView(ctx context.Context, coll *Collection) error {
 	return err
 }
 
-func (s *Service) updateView(ctx context.Context, coll *Collection) error {
-	return s.updateViewWith(ctx, s.runnerForContext(ctx), coll)
-}
-
 func (s *Service) updateViewWith(ctx context.Context, runner dbRunner, coll *Collection) error {
 	if err := s.dropViewWith(ctx, runner, coll.Name); err != nil {
 		return err
 	}
 	return s.createViewWith(ctx, runner, coll)
-}
-
-func (s *Service) dropView(ctx context.Context, name string) error {
-	return s.dropViewWith(ctx, s.runnerForContext(ctx), name)
 }
 
 func (s *Service) dropViewWith(ctx context.Context, runner dbRunner, name string) error {
@@ -490,10 +478,6 @@ func (s *Service) dropViewWith(ctx context.Context, runner dbRunner, name string
 // Table operations
 // ---------------------------------------------------------------------------
 
-func (s *Service) createTable(ctx context.Context, coll *Collection) error {
-	return s.createTableWith(ctx, s.runnerForContext(ctx), coll)
-}
-
 func (s *Service) createTableWith(ctx context.Context, runner dbRunner, coll *Collection) error {
 	columns := s.buildColumnDefsForCollection(coll)
 	sql := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", s.quoteIdent(coll.Name), strings.Join(columns, ",\n  "))
@@ -501,18 +485,10 @@ func (s *Service) createTableWith(ctx context.Context, runner dbRunner, coll *Co
 	return err
 }
 
-func (s *Service) dropTable(ctx context.Context, name string) error {
-	return s.dropTableWith(ctx, s.runnerForContext(ctx), name)
-}
-
 func (s *Service) dropTableWith(ctx context.Context, runner dbRunner, name string) error {
 	sql := fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", s.quoteIdent(name))
 	_, err := runner.Exec(ctx, sql)
 	return err
-}
-
-func (s *Service) syncTable(ctx context.Context, old, new *Collection) error {
-	return s.syncTableWith(ctx, s.runnerForContext(ctx), old, new)
 }
 
 func (s *Service) syncTableWith(ctx context.Context, runner dbRunner, old, new *Collection) error {
@@ -559,19 +535,11 @@ func (s *Service) syncTableWith(ctx context.Context, runner dbRunner, old, new *
 	return nil
 }
 
-func (s *Service) addColumn(ctx context.Context, tableName string, field SchemaField) error {
-	return s.addColumnWith(ctx, s.runnerForContext(ctx), tableName, field)
-}
-
 func (s *Service) addColumnWith(ctx context.Context, runner dbRunner, tableName string, field SchemaField) error {
 	colDef := s.fieldToColumnDef(field)
 	sql := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s", s.quoteIdent(tableName), colDef)
 	_, err := runner.Exec(ctx, sql)
 	return err
-}
-
-func (s *Service) alterColumn(ctx context.Context, tableName string, field SchemaField) error {
-	return s.alterColumnWith(ctx, s.runnerForContext(ctx), tableName, field)
 }
 
 func (s *Service) alterColumnWith(ctx context.Context, runner dbRunner, tableName string, field SchemaField) error {
@@ -581,10 +549,6 @@ func (s *Service) alterColumnWith(ctx context.Context, runner dbRunner, tableNam
 		pgType, s.quoteIdent(field.Name), pgType)
 	_, err := runner.Exec(ctx, sql)
 	return err
-}
-
-func (s *Service) dropColumn(ctx context.Context, tableName, colName string) error {
-	return s.dropColumnWith(ctx, s.runnerForContext(ctx), tableName, colName)
 }
 
 func (s *Service) dropColumnWith(ctx context.Context, runner dbRunner, tableName, colName string) error {
@@ -806,7 +770,7 @@ func (s *Service) CreateRecord(ctx context.Context, coll *Collection, data map[s
 	fieldDescs := rows.FieldDescriptions()
 	record := make(Record)
 	for i, fd := range fieldDescs {
-		record[string(fd.Name)] = rValues[i]
+		record[fd.Name] = rValues[i]
 	}
 	return s.normalizeRecord(coll, record), nil
 }
@@ -861,7 +825,7 @@ func (s *Service) CreateRecords(ctx context.Context, coll *Collection, records [
 				fieldDescs := rows.FieldDescriptions()
 				record := make(Record)
 				for i, fd := range fieldDescs {
-					record[string(fd.Name)] = rValues[i]
+					record[fd.Name] = rValues[i]
 				}
 				results = append(results, s.normalizeRecord(coll, record))
 			}
@@ -940,7 +904,7 @@ func (s *Service) ListRecords(ctx context.Context, coll *Collection, filterStr, 
 		}
 		record := make(Record)
 		for i, fd := range fieldDescs {
-			record[string(fd.Name)] = values[i]
+			record[fd.Name] = values[i]
 		}
 		records = append(records, s.normalizeRecord(coll, record))
 	}
@@ -1016,7 +980,7 @@ func (s *Service) GetRecord(ctx context.Context, coll *Collection, recordID stri
 	fieldDescs := rows.FieldDescriptions()
 	record := make(Record)
 	for i, fd := range fieldDescs {
-		record[string(fd.Name)] = values[i]
+		record[fd.Name] = values[i]
 	}
 	return s.normalizeRecord(coll, record), nil
 }
@@ -1191,7 +1155,7 @@ func (s *Service) expandRelationField(ctx context.Context, records []Record, fie
 		values, _ := rows.Values()
 		relatedRecord := make(Record)
 		for i, fd := range fieldDescs {
-			relatedRecord[string(fd.Name)] = values[i]
+			relatedRecord[fd.Name] = values[i]
 		}
 		relatedRecord = s.normalizeRecord(relatedCollection, relatedRecord)
 		if id := strings.TrimSpace(fmt.Sprint(relatedRecord["id"])); id != "" {

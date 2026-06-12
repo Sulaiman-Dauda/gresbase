@@ -343,10 +343,6 @@ func (h *Handlers) BackupsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.app.Mailer() != nil {
-		// Notify admins about backup completion
-	}
-
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 	h.app.Auth().RecordAudit(r.Context(), adminID, "backup.create", "_backups", info.ID, map[string]any{"name": info.Name}, r)
 	writeJSON(w, 201, info)
@@ -541,8 +537,4 @@ func decodeStringSliceJSON(raw []byte) []string {
 		return nil
 	}
 	return result
-}
-
-func generateID() string {
-	return fmt.Sprintf("%x", time.Now().UnixNano())
 }

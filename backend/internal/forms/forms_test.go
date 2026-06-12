@@ -1,6 +1,7 @@
 package forms
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gresbase/gresbase/internal/collection"
@@ -153,8 +154,8 @@ func TestSettingsUpdateFormEmailTemplates(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation error for broken template")
 	}
-	errs, ok := err.(Errors)
-	if !ok {
+	var errs Errors
+	if !errors.As(err, &errs) {
 		t.Fatalf("expected forms.Errors, got %T", err)
 	}
 	if _, ok := errs["email_templates.otp"]; !ok {

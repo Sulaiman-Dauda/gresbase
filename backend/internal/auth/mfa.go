@@ -4,11 +4,12 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // G505: HMAC-SHA1 is mandated by RFC 6238 (TOTP); used only for OTP generation, not as a security hash.
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -137,7 +138,10 @@ func (s *MFAService) ValidateToken(ctx context.Context, adminID, code string) (b
 	).Scan(&secret, &enabled)
 
 	if err != nil {
-		return false, nil // MFA not set up, allow
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil // MFA not set up, allow.
+		}
+		return false, err // Fail closed on real DB errors.
 	}
 
 	if !enabled {
@@ -206,7 +210,11 @@ func (s *MFAService) IsMFAEnabled(ctx context.Context, adminID string) bool {
 // generateTOTPSecret generates a cryptographically random base32 secret.
 func generateTOTPSecret() string {
 	bytes := make([]byte, 20) // 160 bits
-	rand.Read(bytes)
+	// crypto/rand.Read only fails on a broken system entropy source, which is
+	// unrecoverable; a panic here is preferable to issuing a weak secret.
+	if _, err := rand.Read(bytes); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed generating TOTP secret: %v", err))
+	}
 	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(bytes)
 }
 
@@ -218,7 +226,14 @@ func generateTOTP(secret string, t time.Time) (string, error) {
 		return "", fmt.Errorf("decode secret: %w", err)
 	}
 
-	counter := uint64(t.Unix() / 30)
+	// RFC 6238 time-step counter. Unix time is non-negative for any real clock;
+	// clamp defensively so the int64->uint64 conversion can never wrap.
+	step := t.Unix() / 30
+	if step < 0 {
+		step = 0
+	}
+	//nolint:gosec // G115 false positive: step is clamped to >= 0 above, so the int64->uint64 conversion cannot wrap.
+	counter := uint64(step)
 
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, counter)
@@ -283,11 +298,11 @@ func hashBackupCodes(codes []string) []string {
 // generateRandomCode generates a random alphanumeric code of given length.
 func generateRandomCode(length int) string {
 	const charset = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	raw := make([]byte, length)
+	mustRandRead(raw)
 	b := make([]byte, length)
-	for i := range b {
-		randomByte := make([]byte, 1)
-		rand.Read(randomByte)
-		b[i] = charset[int(randomByte[0])%len(charset)]
+	for i, v := range raw {
+		b[i] = charset[int(v)%len(charset)]
 	}
 	return string(b)
 }
@@ -301,7 +316,7 @@ func sha256Hash(s string) string {
 // generateID creates a short unique ID for records.
 func generateID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	mustRandRead(b)
 	return fmt.Sprintf("%x", b)
 }
 
