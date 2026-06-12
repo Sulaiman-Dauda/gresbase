@@ -5,7 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-06-12
+
+First stable release. Gresbase is a single-binary, self-hosted backend platform
+built on PostgreSQL: dynamic collections with locked-by-default access rules, a
+full authentication suite, a rule-enforced realtime engine, file storage, and an
+embedded admin dashboard.
 
 ### Security
 
@@ -36,11 +41,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   system is gone. File-based JS hooks in `./gb_hooks` are kept.
 - Multi-tenant support — Gresbase is now a single-instance deployment.
 
-## [1.0.0] - Planned
-
-First stable release. Consolidates the changes listed under
-[Unreleased](#unreleased): CI, cert-file TLS, and the removal of the embedded
-ACME CA, the dynamic JS plugin runtime, and multi-tenant support.
-
-[Unreleased]: https://github.com/gresbase/gresbase/compare/main...HEAD
 [1.0.0]: https://github.com/gresbase/gresbase/releases/tag/v1.0.0

@@ -18,7 +18,6 @@ import (
 // embedded data directories. Existing data directories always keep the major
 // recorded in their PG_VERSION file — PostgreSQL cannot start a new major
 // against an old cluster, and silently trying would risk the data.
-// (Supabase moved their self-host default to 17 in June 2026.)
 const defaultEmbeddedMajor = 17
 
 // embeddedVersions maps a PostgreSQL major version to the full version the

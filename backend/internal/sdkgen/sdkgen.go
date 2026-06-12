@@ -1,5 +1,5 @@
 // Package sdkgen generates a self-contained, typed TypeScript SDK from the
-// live collection schema. It runs at the application layer (no PostgREST) and
+// live collection schema. It runs at the application layer and
 // produces a single importable module containing one interface per collection
 // plus a typed client that wraps fetch with per-collection CRUD methods.
 package sdkgen

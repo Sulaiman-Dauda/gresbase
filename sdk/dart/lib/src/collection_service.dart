@@ -219,7 +219,7 @@ class CollectionService {
     return AggregateResponse.fromJson(result as Map<String, dynamic>);
   }
 
-  // ---- Record Auth (PocketBase-style, for auth collections) ----
+  // ---- Record Auth (for auth collections) ----
 
   /// Authenticate a collection record with identity (email/username) and
   /// password.

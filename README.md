@@ -24,20 +24,20 @@ larger platform does with a sidecar service, Gresbase does with a Postgres featu
 - **RLS-grade rules without the footguns** — locked-by-default app-layer rules with a preset catalog and a **rule simulator** ("would user X pass this rule against this record?") so policies are testable before they ship.
 - **Real Postgres RLS, generated** — compile your collection rules into `CREATE POLICY` statements for a restricted role, so direct database connections are guarded too. → `GET /api/v1/rls/script`, `POST /api/v1/rls/apply`
 - **Webhooks without pg_net** — HMAC-SHA256-signed event forwarding (Stripe-style `t=,v1=` signatures) with retries and a delivery log, delivered by in-process workers. → `/api/v1/webhooks`
-- **SQL console + schema introspection** — superuser SQL editor (read-only by default) and a structured schema API. The job Supabase runs a `postgres-meta` container for. → `POST /api/v1/sql`, `GET /api/v1/sql/schema`
-- **Typed SDK from your schema** — `gresbase types` or `GET /api/v1/types.ts` generates a typed TypeScript client. PostgREST-style ergonomics, no extra service.
+- **SQL console + schema introspection** — superuser SQL editor (read-only by default) and a structured schema API, all in-process. No separate database-metadata service to run. → `POST /api/v1/sql`, `GET /api/v1/sql/schema`
+- **Typed SDK from your schema** — `gresbase types` or `GET /api/v1/types.ts` generates a typed TypeScript client straight from your live schema. No code-generation service to run.
 - **Horizontal realtime** — set `realtime_multi_node: true` and record events travel between app nodes over Postgres `LISTEN/NOTIFY`. No Redis, no broker.
 - **Prometheus metrics in-process** — `GET /metrics` text exposition, optional bearer token. No log-shipping sidecars.
-- **REST aggregations** — `count`, `sum`, `avg`, `min`, `max` with `groupBy`, filtered and **list-rule enforced** in SQL. Not available in PostgREST-less Supabase self-hosting. → `GET /api/v1/records/{c}/aggregate?aggregate=count,sum:amount&groupBy=status`
+- **REST aggregations** — `count`, `sum`, `avg`, `min`, `max` with `groupBy`, filtered and **list-rule enforced**, computed in SQL so you never ship rows to the client just to count them. → `GET /api/v1/records/{c}/aggregate?aggregate=count,sum:amount&groupBy=status`
 - **Rule-enforced relation expansion** — forward (`?expand=author`), back-relations (`?expand=comments_via_post`), and nested paths (`comments_via_post.user`, up to 6 levels). Every level honors the target collection's rules, so a public collection can never leak a locked one through expand.
 - **Anonymous sign-in** — `POST /api/v1/collections/{c}/auth/auth-with-anonymous` mints a throwaway user for try-before-signup flows. Off by default per collection; gate rules with `@request.auth.anonymous = false`.
 - **Passkeys (WebAuthn)** — phishing-resistant, passwordless sign-in for auth collections, in-process via go-webauthn. Off by default per collection (`allowPasskeys`); discoverable credentials, no email enumeration, SDK helpers included. → `POST /api/v1/collections/{c}/auth/passkey/login-begin`
-- **WAL change capture** — opt-in logical-replication consumer (`realtime_wal_enabled`) so rows changed by *direct SQL* — psql, the SQL console, the generated RLS role — reach realtime subscribers too, rule-checked like everything else. The job Supabase runs an Elixir service for, in-process via pglogrepl.
-- **Resumable uploads (TUS)** — `POST /api/v1/files/tus/` attaches large files to records over flaky connections with full rule + field-constraint enforcement. The job Supabase Storage runs a sidecar container for.
+- **WAL change capture** — opt-in logical-replication consumer (`realtime_wal_enabled`) so rows changed by *direct SQL* — psql, the SQL console, the generated RLS role — reach realtime subscribers too, rule-checked like everything else. Captured in-process via `pglogrepl`; no separate change-data-capture service.
+- **Resumable uploads (TUS)** — `POST /api/v1/files/tus/` attaches large files to records over flaky connections with full rule + field-constraint enforcement. No upload sidecar to run.
 - **Schema migrations as files** — dev-mode collection changes are snapshotted to `./gb_migrations/*.json` and replayed on boot, so schemas live in git and deploy reproducibly (`gresbase migrations snapshot|list|apply`).
 - **Editable email templates** — every transactional email customizable from the dashboard, validated at save time, with built-in defaults as a can't-break fallback.
 - **Realtime broadcast + presence** — client-to-client channel messages (`POST /api/v1/realtime/broadcast`, auth required) and per-channel presence with join/leave events and member state. Travels across nodes over `LISTEN/NOTIFY` in multi-node mode.
-- **On-the-fly image transforms** — `?thumb=400x300f&format=jpeg&quality=80` on file URLs, generated in-process and cached. The job Supabase runs an `imgproxy` container for.
+- **On-the-fly image transforms** — `?thumb=400x300f&format=jpeg&quality=80` on file URLs, generated in-process and cached. No image-proxy sidecar to run.
 - **File-based JS hooks with hot reload** — drop `*.js` files in `./gb_hooks` to handle record/auth events; edits reload live. No Deno runtime, no cold starts. Scaffold with `gresbase hooks init` (includes `types.d.ts` for editor autocomplete).
 - **Read-replica routing** — set `DATABASE_REPLICA_URL` and record lists, aggregations, and relation expansion route to a PostgreSQL read replica; writes and rule-feeding reads stay on the primary. The scale lever a single-writer SQLite backend structurally cannot offer.
 - **Embed as a Go framework** — write hooks in real Go and add custom routes; see [`backend/examples/embed`](backend/examples/embed).
@@ -53,16 +53,16 @@ larger platform does with a sidecar service, Gresbase does with a Postgres featu
 
 ## What is Gresbase?
 
-A **single-binary, self-hosted backend platform** that aims to provide:
+A **single-binary, self-hosted backend platform** built on PostgreSQL:
 
-- **Dynamic Collections** — Define PostgreSQL-backed schemas from the dashboard or API, locked-by-default access rules ✅
-- **Authentication** — Email/password, OAuth, magic links, OTP, API keys, end-user record auth ✅
-- **Realtime Engine** — SSE/WebSocket record subscriptions with per-subscriber rule enforcement ✅
-- **File Storage** — Local or S3-compatible storage, downloads gated by collection view rules ✅
-- **Admin Dashboard** — Next.js + Tailwind CSS + shadcn/ui, embedded in the binary ✅
-- **Extensible** — Event hooks on every request path, Go hooks, and file-based JS hooks (`./gb_hooks`) with hot reload ✅
+- **Dynamic Collections** — Define PostgreSQL-backed schemas from the dashboard or API, with locked-by-default access rules.
+- **Authentication** — Email/password, OAuth, magic links, OTP, passkeys, API keys, and end-user record auth.
+- **Realtime Engine** — SSE/WebSocket record subscriptions with per-subscriber rule enforcement.
+- **File Storage** — Local or S3-compatible storage, with downloads gated by collection view rules.
+- **Admin Dashboard** — Next.js + Tailwind CSS + shadcn/ui, embedded in the binary.
+- **Extensible** — Event hooks on every request path, Go hooks, and file-based JS hooks (`./gb_hooks`) with hot reload.
 
-**Legend**: ✅ = Working with tests | 📋 = Planned
+Everything runs in one process against one PostgreSQL database — no extra services, brokers, or sidecars.
 
 ## Quick Start
 
@@ -395,42 +395,21 @@ This is a **1.0 release** with a production-ready core. Here's an honest assessm
 - **Embedded PostgreSQL** — the single-binary embedded PostgreSQL mode is intended for development and small deployments. For production, point `DATABASE_URL` at an external (managed or self-run) PostgreSQL; pgvector features also require external PostgreSQL.
 - **TLS** — terminate at a reverse proxy (Caddy/nginx/Traefik), or serve HTTPS directly from operator-provided cert files via `ENABLE_TLS` + `TLS_CERT_FILE` / `TLS_KEY_FILE`.
 
-### Not yet implemented 📋
-- Published SDK packages — both SDKs are publish-ready (`sdk/typescript`: dual CJS/ESM build, 43 tests; `sdk/dart`: parity feature set, 26 tests); npm and pub.dev publication pending.
-- Presence member lists are node-local in multi-node mode (join/leave events do propagate).
+### Known limitations
+- **SDK packages are not yet published to registries.** Both clients are build-ready and tested (`sdk/typescript`: dual CJS/ESM build, 43 tests; `sdk/dart`: parity feature set, 26 tests); npm and pub.dev publication is pending. Use them directly from this repository in the meantime.
+- **Presence member lists are node-local** in multi-node mode. Join/leave events still propagate across nodes; only the point-in-time member snapshot is per-node.
+- **Some advanced features require external PostgreSQL** — vector search needs the `pgvector` extension, and WAL change capture needs `wal_level = logical`. The embedded PostgreSQL is for development and small single-node deployments.
 
-### Deliberately not built ❌
-- **GraphQL** — in Supabase this is a pg extension plus gateway plumbing; the filter/expand/aggregate REST surface covers the same CRUD ground without another query language to secure.
-- **Edge functions / Deno runtime, API gateway, connection pooler service, analytics sidecar** — each one is a second process with its own port and secrets. That's the Supabase self-host failure mode this project exists to avoid. JS file hooks and Go hooks cover the extensibility need in-process.
+### Scope — what Gresbase intentionally leaves out
 
-### Test Coverage
+Gresbase keeps a deliberately small surface so the whole system stays in one process:
 
-Core paths are covered by integration tests that boot a real PostgreSQL and exercise the live HTTP surface — auth, collections, records, locked-by-default rule enforcement (across REST, batch, search, files, and realtime delivery), and the realtime engine.
+- **No GraphQL.** The REST surface — filtering, relation expansion, and aggregation — covers the same ground without a second query language to secure.
+- **No separate edge-function runtime, API gateway, connection pooler, or analytics service.** Each of those would be another process with its own port and secrets. Extensibility is covered in-process by Go hooks and file-based JS hooks instead.
 
-### Roadmap
+### Test coverage
 
-1. **Milestone 1 — Solid Core**
-   - [x] Integration test suite against ephemeral PostgreSQL
-   - [x] Locked-by-default access rules enforced on every read/write path
-   - [x] Realtime rule enforcement and hardening
-   - [ ] Deeper unit coverage for auth/collection/database packages
-
-2. **Milestone 2 — Working Dashboard**
-   - [ ] Wire all Next.js pages to the API
-   - [ ] Add frontend tests (Vitest)
-   - [ ] Collection schema editor
-   - [ ] File browser
-
-3. **Milestone 3 — SDK Releases**
-   - [ ] Publish TypeScript SDK to npm
-   - [ ] Publish Dart SDK to pub.dev
-   - [ ] SDK documentation
-
-4. **Milestone 4 — Advanced Features**
-   - [x] Row-Level Security at PostgreSQL level (generated from collection rules)
-   - [x] Vector search (pgvector)
-   - [x] Webhooks (HMAC-signed event forwarding)
-   - [ ] Real-time presence
+Core paths are covered by integration tests that boot a real PostgreSQL and exercise the live HTTP surface — authentication, collections, records, locked-by-default rule enforcement (across REST, batch, search, file downloads, and realtime delivery), and the realtime engine. The suite runs on every CI build with the race detector enabled.
 
 ## License
 

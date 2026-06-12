@@ -420,9 +420,9 @@ export function renderRecordFieldValue(
 ) {
   if (field.type === 'bool' && value != null && value !== '') {
     return value ? (
-      <Check className="h-4 w-4 text-emerald-500" aria-label="true" />
+      <Check className="h-4 w-4 text-emerald-500" role="img" aria-label="Yes" />
     ) : (
-      <X className="h-4 w-4 text-muted-foreground/50" aria-label="false" />
+      <X className="h-4 w-4 text-muted-foreground/50" role="img" aria-label="No" />
     )
   }
 

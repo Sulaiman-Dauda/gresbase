@@ -12,7 +12,7 @@ import (
 
 // QueryBuilder provides a fluent, safe SQL query builder for PostgreSQL.
 // It generates parameterized queries to prevent SQL injection while
-// providing a readable, chainable API similar to PocketBase's dbx.
+// providing a readable, chainable query API.
 type QueryBuilder struct {
 	pool         *pgxpool.Pool
 	table        string

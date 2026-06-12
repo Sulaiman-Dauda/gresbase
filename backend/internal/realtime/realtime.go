@@ -11,7 +11,7 @@
 //	 ├── WSClient  (WebSocket, fallback)
 //	 └── Registry  (subscription brokering)
 //
-// Matches PocketBase's realtime capabilities.
+// Realtime engine.
 package realtime
 
 import (
@@ -44,7 +44,7 @@ const (
 	DefaultIdleTimeout = 5 * time.Minute
 	// DefaultMaxConnectionAge is the maximum lifetime of a single realtime
 	// connection before it is closed cleanly (clients auto-reconnect).
-	// Prevents zombie connections; matches PocketBase's 30 minute default.
+	// Prevents zombie connections; 30 minute default.
 	DefaultMaxConnectionAge = 30 * time.Minute
 	// DefaultMaxConnections is the maximum number of concurrent realtime clients.
 	DefaultMaxConnections = 10000
@@ -786,7 +786,7 @@ func (h *Hub) BroadcastRecordFromWAL(action string, collectionName string, recor
 // subscribers. It is the delivery path for both single-node mode and the
 // cluster listener.
 func (h *Hub) localBroadcastRecord(action string, collectionName string, recordID string, data map[string]any) {
-	// Generate topics that match PocketBase format:
+	// Generate topics in the format:
 	// "{collection_name}/{record_id}" for specific record
 	// "{collection_name}/*" for any record in collection
 
@@ -1609,7 +1609,7 @@ func (h *Hub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set SSE headers (matching PocketBase)
+	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Connection", "keep-alive")

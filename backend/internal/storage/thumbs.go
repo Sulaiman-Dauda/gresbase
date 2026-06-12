@@ -20,7 +20,7 @@ const maxThumbDimension = 2048
 
 // ThumbOptions describes a requested thumbnail variant.
 type ThumbOptions struct {
-	Size    string // "WxH", "Wx", "xH" — PocketBase-compatible
+	Size    string // "WxH", "Wx", "xH"
 	Crop    string // "center" (default), "top", "fit"
 	Format  string // "" (keep source format), "jpeg", "png"
 	Quality int    // 0 = default, else 1-100 (JPEG encode quality)
@@ -48,7 +48,7 @@ func (o *ThumbOptions) ApplyTransform(format, quality string) error {
 	return nil
 }
 
-// ParseThumb parses a PocketBase-style thumb parameter: "100x100" (center
+// ParseThumb parses a thumb parameter: "100x100" (center
 // crop), "100x100t" (top crop), "100x100f" (fit, no crop), "100x300".
 func ParseThumb(raw string) (ThumbOptions, error) {
 	raw = strings.TrimSpace(strings.ToLower(raw))
@@ -64,7 +64,7 @@ func ParseThumb(raw string) (ThumbOptions, error) {
 		opts.Crop = "fit"
 		raw = raw[:len(raw)-1]
 	case 'b':
-		// Bottom crop is accepted for PocketBase compatibility but anchors
+		// Bottom crop is accepted for compatibility but anchors
 		// center: the resizer supports center/top anchors only.
 		opts.Crop = "center"
 		raw = raw[:len(raw)-1]

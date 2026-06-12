@@ -53,7 +53,7 @@ type OAuthState struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-// OAuthAuthMethodProvider is the PocketBase-style provider descriptor returned
+// OAuthAuthMethodProvider is the provider descriptor returned
 // by the auth-methods endpoint.
 type OAuthAuthMethodProvider struct {
 	Name                string `json:"name"`
@@ -68,7 +68,7 @@ type OAuthAuthMethodProvider struct {
 }
 
 // OAuthProviderCatalogItem is the public provider metadata returned by the
-// PocketBase-compatible meta providers route.
+// meta providers route.
 type OAuthProviderCatalogItem struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName"`
@@ -467,7 +467,7 @@ func (s *OAuthService) GetProviders() []*OAuthProvider {
 }
 
 // GetAvailableProviders returns the list of enabled providers in
-// PocketBase-compatible format for the auth-methods endpoint.
+// the format expected by the auth-methods endpoint.
 func (s *OAuthService) GetAvailableProviders() []map[string]any {
 	providers := s.ProviderCatalog(true)
 	result := make([]map[string]any, 0, len(providers))
@@ -510,7 +510,7 @@ func (s *OAuthService) ProviderCatalog(configuredOnly bool) []OAuthProviderCatal
 	return result
 }
 
-// AuthMethodProviders prepares PocketBase-style OAuth provider descriptors for
+// AuthMethodProviders prepares OAuth provider descriptors for
 // a collection auth-methods response.
 func (s *OAuthService) AuthMethodProviders(ctx context.Context, redirectURL string) []OAuthAuthMethodProvider {
 	catalog := s.ProviderCatalog(true)

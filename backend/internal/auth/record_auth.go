@@ -1,6 +1,6 @@
 // Package auth provides record-level authentication.
 //
-// PocketBase's killer feature: users are just records in an "auth" collection.
+// Users are just records in an "auth" collection.
 // This module enables:
 //   - Password authentication for records (users)
 //   - OTP authentication for records
@@ -28,7 +28,7 @@ import (
 )
 
 // RecordAuthService handles authentication for auth collection records (end users).
-// This is separate from the admin auth service and provides PocketBase-compatible
+// This is separate from the admin auth service and provides
 // record-level authentication.
 type RecordAuthService struct {
 	db      *database.DB

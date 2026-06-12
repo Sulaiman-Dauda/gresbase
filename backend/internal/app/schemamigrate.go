@@ -13,7 +13,7 @@ import (
 // (gb_migrations). Nil until Bootstrap.
 func (app *App) SchemaMigrations() *schemamigrate.Runner { return app.schemaMigrate }
 
-// bindSchemaAutomigrate wires PocketBase-style automigrate: in dev mode,
+// bindSchemaAutomigrate wires automigrate: in dev mode,
 // every collection create/update/delete made through the dashboard/API writes
 // a migration file to gb_migrations/, pre-marked as applied (the live
 // database already has the state — the file exists for git history and for

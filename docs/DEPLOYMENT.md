@@ -245,8 +245,8 @@ export TLS_CERT_FILE=/etc/gresbase/tls/fullchain.pem
 export TLS_KEY_FILE=/etc/gresbase/tls/privkey.pem
 ```
 
-You are then responsible for certificate renewal. (The experimental embedded
-ACME CA is **disabled by default** and not recommended for production.)
+You are then responsible for certificate renewal. For most deployments,
+terminating TLS at a reverse proxy is simpler and is the recommended approach.
 
 ---
 
@@ -328,9 +328,9 @@ volume), or rely on S3 versioning when using the `s3` backend.
 - [ ] **`DEV_MODE` is off** in production (it relaxes auth/validation).
 - [ ] **`/metrics` protected** with `METRICS_TOKEN` if reachable beyond a
       trusted network.
-- [ ] **JS hooks/plugins are trusted code** — the goja runtime is **not**
-      sandboxed and runs in-process. Only load first-party `HOOKS_DIR` files;
-      keep plugins off unless you wrote them.
+- [ ] **JS file hooks are trusted code** — the hook runtime is **not**
+      sandboxed and runs in-process. Only load first-party `HOOKS_DIR` files
+      that you wrote and trust; set `HOOKS_DIR=""` to disable hooks entirely.
 - [ ] **Run as non-root** (the image already uses uid 10001;
       add `no-new-privileges` / read-only root FS where possible).
 - [ ] **Backups configured** (`BACKUP_CRON` + `BACKUP_MAX_KEEP`, ideally

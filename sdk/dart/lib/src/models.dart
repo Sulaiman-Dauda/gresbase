@@ -47,7 +47,7 @@ class AuthResponse {
       };
 }
 
-/// Record auth response (PocketBase-style, for auth collections).
+/// Record auth response (for auth collections).
 class RecordAuthResponse {
   final String token;
   final String refreshToken;

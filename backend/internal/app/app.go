@@ -283,7 +283,7 @@ func (app *App) Bootstrap() error {
 	}
 	app.registerBackupJob()
 
-	// 2d. File-based JS hooks (PocketBase pb_hooks-style). The goja runtime
+	// 2d. File-based JS hooks (the ./gb_hooks convention). The goja runtime
 	// only ever executes *.js files placed next to the binary — placing files
 	// on the server's filesystem already implies full trust (same model as Go
 	// hooks), so there is no separate enable flag. Disable with HOOKS_DIR="".
@@ -401,7 +401,7 @@ func (app *App) Bootstrap() error {
 		log.Info().Str("file", name).Msg("Applied collection schema migration")
 	}
 
-	// 4c. Dev automigrate (PocketBase behavior): collection changes made
+	// 4c. Dev automigrate: collection changes made
 	// through the dashboard/API write migration files automatically.
 	if app.cfg.DevMode && app.cfg.MigrationsDir != "" {
 		app.bindSchemaAutomigrate()

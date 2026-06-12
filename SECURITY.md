@@ -4,9 +4,8 @@ Thank you for helping keep Gresbase and its users safe.
 
 ## Supported Versions
 
-Gresbase is pre-1.0 software. Security fixes are applied to the latest
-release and the `main` branch only. Older tagged releases are not
-back-patched.
+Security fixes are applied to the latest release and the `main` branch. Older
+tagged releases are not back-patched.
 
 | Version | Supported          |
 | ------- | ------------------ |
@@ -55,12 +54,14 @@ For production deployments:
   refuses to start with a missing, generated, or weak secret.
 - **Use an external, managed or self-run PostgreSQL** via `DATABASE_URL`
   rather than the embedded instance.
-- **Terminate TLS at a reverse proxy** (nginx, Caddy, Traefik, a cloud load
-  balancer) rather than relying on the experimental embedded ACME CA.
+- **Terminate TLS at a reverse proxy** (nginx, Caddy, Traefik, or a cloud load
+  balancer), or serve HTTPS directly from operator-provided certificate files
+  (`ENABLE_TLS` + `TLS_CERT_FILE` / `TLS_KEY_FILE`).
 - **Set `TRUSTED_PROXIES`** when running behind a reverse proxy so that
   client IPs (used for rate limiting and audit logging) are derived from the
   correct forwarded headers and cannot be spoofed.
-- Keep experimental subsystems (embedded ACME CA, JS plugin runtime) disabled
-  unless you understand and accept their trust model.
+- **Treat JS file hooks as trusted code.** The hook runtime is not sandboxed and
+  runs in-process; only load first-party `HOOKS_DIR` files you wrote, or set
+  `HOOKS_DIR=""` to disable hooks entirely.
 
 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for full deployment guidance.

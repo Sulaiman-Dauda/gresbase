@@ -2,7 +2,7 @@
 // Users can write custom hooks, validators, and event handlers in JavaScript
 // that execute server-side with access to a sandboxed Gresbase API.
 //
-// Matches PocketBase's JS VM capabilities:
+// JS VM capabilities:
 // - Full $app API (db queries, record CRUD, mailer, filesystem, settings)
 // - $http client for external API calls
 // - $os utilities (file read/write, env vars, exec)

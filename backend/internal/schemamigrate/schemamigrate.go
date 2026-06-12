@@ -1,4 +1,4 @@
-// Package schemamigrate implements PocketBase-style schema migration files
+// Package schemamigrate implements schema migration files
 // for USER collections, so collection schemas live in git and deploy
 // reproducibly. It is entirely separate from Gresbase's own internal
 // migrations (backend/migrations): those manage the platform's system tables,

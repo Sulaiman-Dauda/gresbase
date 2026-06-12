@@ -45,6 +45,7 @@ package gresbase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -173,8 +174,10 @@ func (gb *Gresbase) Execute() error {
 	}()
 
 	go func() {
-		if err := gb.root.Execute(); err != nil {
-			// cobra prints its own errors; log for visibility.
+		if err := gb.root.Execute(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			// http.ErrServerClosed is the expected result of a clean shutdown;
+			// anything else is a real failure. cobra prints its own errors; log
+			// for visibility.
 			log.Error().Err(err).Msg("command execution failed")
 		}
 		done <- true
@@ -318,7 +321,7 @@ func (gb *Gresbase) printBanner() {
 }
 
 // ---------------------------------------------------------------------------
-// Event Hooks (identical API to Pocketbase)
+// Event Hooks
 // ---------------------------------------------------------------------------
 
 // BootstrapEvent is fired after the app is bootstrapped.

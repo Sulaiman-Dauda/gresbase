@@ -78,8 +78,8 @@ type Config struct {
 	S3SecretKey    string `mapstructure:"s3_secret_key"`
 	S3UseSSL       bool   `mapstructure:"s3_use_ssl"`
 
-	// HooksDir is a directory of *.js hook files loaded at boot (PocketBase
-	// pb_hooks-style). Placing files next to the binary already implies full
+	// HooksDir is a directory of *.js hook files loaded at boot
+	// (the ./gb_hooks convention). Placing files next to the binary already implies full
 	// trust (same model as Go hooks), so the runtime runs them unsandboxed.
 	// Empty disables.
 	HooksDir string `mapstructure:"hooks_dir"`
@@ -87,7 +87,7 @@ type Config struct {
 	HooksWatch bool `mapstructure:"hooks_watch"`
 
 	// MigrationsDir is the directory of collection schema migration files
-	// (PocketBase pb_migrations-style). Files are applied on boot; in dev mode
+	// (the ./gb_migrations convention). Files are applied on boot; in dev mode
 	// collection changes made through the dashboard/API are recorded here
 	// automatically. Empty disables the feature.
 	MigrationsDir string `mapstructure:"migrations_dir"`
@@ -112,8 +112,8 @@ type Config struct {
 	RealtimeMultiNode bool `mapstructure:"realtime_multi_node"`
 	// RealtimeMaxConnectionAge caps how long a single realtime connection
 	// (SSE or WebSocket) may stay open before the server closes it cleanly;
-	// clients auto-reconnect. Prevents zombie connections (PocketBase uses the
-	// same 30m default). 0 disables the cap.
+	// clients auto-reconnect. Prevents zombie connections (30m default).
+	// 0 disables the cap.
 	RealtimeMaxConnectionAge time.Duration `mapstructure:"realtime_max_connection_age"`
 
 	// RealtimeWALEnabled turns on WAL-based change capture: record events are

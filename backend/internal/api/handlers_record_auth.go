@@ -18,7 +18,7 @@ import (
 // Record Auth (end-user authentication for auth collections)
 // ---------------------------------------------------------------------------
 
-// OAuth2ProvidersMeta returns the global PocketBase-style OAuth provider catalog.
+// OAuth2ProvidersMeta returns the global OAuth provider catalog.
 func (h *Handlers) OAuth2ProvidersMeta(w http.ResponseWriter, r *http.Request) {
 	providers := []auth.OAuthProviderCatalogItem{}
 	if h.app.OAuth() != nil {
@@ -28,7 +28,7 @@ func (h *Handlers) OAuth2ProvidersMeta(w http.ResponseWriter, r *http.Request) {
 }
 
 // RecordAuthMethods returns the available authentication methods for an auth collection.
-// PocketBase-compatible: GET /api/v1/collections/{collection}/auth-methods
+// GET /api/v1/collections/{collection}/auth-methods
 func (h *Handlers) RecordAuthMethods(w http.ResponseWriter, r *http.Request) {
 	collName := chi.URLParam(r, "collection")
 	coll, err := h.app.Collections().GetCollectionByName(r.Context(), collName)
@@ -39,7 +39,7 @@ func (h *Handlers) RecordAuthMethods(w http.ResponseWriter, r *http.Request) {
 
 	event := &events.RecordAuthRequestEvent{App: h.app, Request: r, Info: toEventRequestInfo(r), Action: "methods", CollectionID: coll.ID, CollectionName: coll.Name}
 
-	// Build auth methods response (PocketBase-compatible format)
+	// Build auth methods response
 	methods := map[string]any{
 		"usernamePassword": false,
 		"emailPassword":    false,
@@ -265,7 +265,7 @@ func (h *Handlers) recordOAuth2ExchangeAndAuth(r *http.Request, action, collName
 	return userInfo, result, nil
 }
 
-// RecordAuthOAuth2 handles PocketBase-style POST auth-with-oauth2 requests.
+// RecordAuthOAuth2 handles POST auth-with-oauth2 requests.
 func (h *Handlers) RecordAuthOAuth2(w http.ResponseWriter, r *http.Request) {
 	collName := chi.URLParam(r, "collection")
 	var form forms.RecordAuthOAuth2Form
@@ -574,7 +574,7 @@ func recordAuthResultID(result *auth.RecordAuthResult) string {
 	return id
 }
 
-// OAuth2RedirectBridge provides a PocketBase-style popup redirect endpoint that
+// OAuth2RedirectBridge provides a popup redirect endpoint that
 // relays OAuth callback params back to the opener window.
 func (h *Handlers) OAuth2RedirectBridge(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()

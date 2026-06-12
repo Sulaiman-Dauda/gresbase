@@ -2,7 +2,7 @@
  * Gresbase TypeScript SDK
  *
  * Production-grade client SDK for the Gresbase backend platform.
- * Matches PocketBase JS SDK capabilities:
+ * Capabilities:
  * - Full CRUD with filtering, sorting, pagination
  * - Auth (email/password, OAuth, OTP, magic link, API keys)
  * - Realtime subscriptions (SSE primary, WebSocket fallback)
@@ -1136,7 +1136,7 @@ class CollectionService<T extends RecordData = RecordData> {
     return this.http.request<AggregateResponse>('GET', `/api/v1/records/${this.collectionName}/aggregate?${new URLSearchParams(query)}`)
   }
 
-  // ---- Record Auth (PocketBase-style, for auth collections) ----
+  // ---- Record Auth (for auth collections) ----
 
   private get authBasePath(): string {
     return `/api/v1/collections/${this.collectionName}/auth`

@@ -1,6 +1,6 @@
 package cli
 
-// Self-update command (`gresbase update`), PocketBase-style.
+// Self-update command (`gresbase update`).
 //
 // Release asset naming convention (release CI must follow this):
 //

@@ -393,7 +393,7 @@ func (f *OAuthCallbackForm) Validate() error {
 	return nil
 }
 
-// RecordAuthOAuth2Form validates PocketBase-style record OAuth2 auth payloads.
+// RecordAuthOAuth2Form validates record OAuth2 auth payloads.
 type RecordAuthOAuth2Form struct {
 	Provider     string         `json:"provider"`
 	Code         string         `json:"code"`

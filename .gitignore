@@ -39,7 +39,15 @@ Thumbs.db
 /storage/
 /backend/storage/
 .backups/
-.certmagic/
+
+# Runtime-generated collection schema migrations (each deployment commits its
+# own ./gb_migrations; the source repo does not ship example user collections)
+/gb_migrations/
+backend/gb_migrations/
+
+# Runtime-generated JS hooks directory
+/gb_hooks/
+backend/gb_hooks/
 
 # Embedded PostgreSQL data (single-binary mode)
 gresbase_data/

@@ -25,7 +25,7 @@ Health check endpoint.
 ```json
 {
   "status": "healthy",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "uptime": "2h34m15s",
   "uptime_ms": 9255000,
   "components": {
@@ -34,7 +34,7 @@ Health check endpoint.
     "realtime": { "status": "healthy" }
   },
   "system": {
-    "go_version": "go1.23.0",
+    "go_version": "go1.25.0",
     "num_cpu": 4,
     "num_goroutines": 25,
     "alloc_mb": 12.5
@@ -578,36 +578,6 @@ A subscription with `options.presence` set announces the client on the topic: ot
 ```
 
 `clients` counts all subscribers of the topic; `members` lists only those that declared presence state. On multi-node deployments presence member lists are node-local.
-
----
-
-## ACME CA / Certificates
-
-### `GET /acme/directory`
-ACME directory endpoint. Returns URLs for ACME operations.
-
-### `POST /acme/new-account`
-Create an ACME account.
-
-### `POST /acme/new-order`
-Place a certificate order.
-
-### `GET /certificates`
-List managed certificates.
-
-### `POST /certificates/issue`
-Issue a new certificate.
-
-**Request Body**
-```json
-{
-  "domain": "example.com",
-  "challenge_type": "http-01"
-}
-```
-
-### `DELETE /certificates/{id}`
-Revoke a certificate.
 
 ---
 

@@ -1,16 +1,17 @@
 # Gresbase Features Guide
 
 This guide covers the capabilities that make Gresbase a PostgreSQL-native
-self-hosted backend platform, with the power people reach for Supabase for — minus
-the operational sprawl. **The governing principle: PostgreSQL is the only piece
-of infrastructure.** Everything below runs inside the single binary or inside
-your existing Postgres. No extra services, gateways, or sidecars.
+self-hosted backend platform with serious power and minimal operational sprawl.
+**The governing principle: PostgreSQL is the only piece of infrastructure.**
+Everything below runs inside the single binary or inside your existing
+PostgreSQL. No extra services, gateways, or sidecars.
 
 - [Access rules (locked by default)](#access-rules-locked-by-default)
 - [Rule presets & the rule simulator](#rule-presets--the-rule-simulator)
 - [Aggregations](#aggregations)
 - [Relation expansion](#relation-expansion)
 - [Anonymous sign-in](#anonymous-sign-in)
+- [Passkeys (WebAuthn)](#passkeys-webauthn)
 - [Vector search (pgvector)](#vector-search-pgvector)
 - [Typed SDK generation](#typed-sdk-generation)
 - [Realtime](#realtime)
@@ -67,9 +68,10 @@ Request macros available in rules: `@request.auth.id`, `@request.auth.email`,
 
 ## Rule presets & the rule simulator
 
-Supabase's most-cited footgun is that Row-Level Security policies are powerful but
-**untestable** — a leaky policy is a silent breach. Gresbase keeps rules in the app
-layer (easy to reason about) and adds the two things RLS lacks:
+Database row-level security is powerful but hard to test — a leaky policy is a
+silent breach you only find in production. Gresbase keeps rules in the app layer
+(easy to read and reason about) and adds two things that make them safe to
+ship:
 
 **Presets** — `GET /api/v1/collections/meta/rule-presets` returns a catalog:
 `locked`, `public`, `authenticated`, `owner-only`, `verified-only`,
@@ -228,9 +230,9 @@ Details that matter:
 
 ## Vector search (pgvector)
 
-Add a `vector` field to any collection to store embeddings and run semantic search —
-the AI/RAG use-case SQLite-based tools structurally cannot serve. It costs
-**zero extra infrastructure**: pgvector is a PostgreSQL extension.
+Add a `vector` field to any collection to store embeddings and run semantic
+search — the building block for AI and retrieval-augmented-generation features.
+It costs **zero extra infrastructure**: pgvector is a PostgreSQL extension.
 
 Define a vector field (dashboard schema editor, or via the API):
 
@@ -258,18 +260,19 @@ Results are ordered by similarity, annotated with `_distance`, and **respect the
 collection's list rule** — a similarity search never returns rows the caller may
 not see.
 
-**Availability:** vector fields require the `vector` extension. Managed Postgres
-(Supabase's own Postgres, Neon, RDS with pgvector, the `pgvector/pgvector` image)
-ship it. The zero-dependency embedded PostgreSQL does **not**, so `GET
-/api/v1/features` reports `"vector": false` there and the dashboard guides you to
-an external Postgres. Creating a vector collection on a server without pgvector
-returns a clear error instead of failing mysteriously.
+**Availability:** vector fields require the `vector` extension. Most managed
+PostgreSQL providers ship it (Neon, RDS/Aurora with pgvector, the
+`pgvector/pgvector` Docker image, and others). The zero-dependency embedded
+PostgreSQL does **not**, so `GET /api/v1/features` reports `"vector": false`
+there and the dashboard guides you to an external PostgreSQL. Creating a vector
+collection on a server without pgvector returns a clear error instead of failing
+mysteriously.
 
 ---
 
 ## Typed SDK generation
 
-Get PostgREST-style typed ergonomics generated **at the app layer** — no extra
+Get fully typed client ergonomics generated **at the app layer** — no extra
 service to run. The server generates a TypeScript module from your live schema:
 
 ```bash
@@ -286,8 +289,9 @@ You get one interface per collection (field types mapped to TS — `vector` →
 `list/getOne/create/update/delete` per collection. Regenerate whenever your schema
 changes.
 
-The hand-maintained client (`gresbase-sdk` 0.4.0 on npm) covers the full
-surface: record auth (`authWithPassword`, `authWithAnonymous`, `authRefresh`,
+The hand-maintained client (`sdk/typescript`, version 1.0.0 — build-ready,
+registry publication pending) covers the full surface: record auth
+(`authWithPassword`, `authWithAnonymous`, `authRefresh`,
 password reset and email verification), `aggregate()`, realtime channels
 (`subscribeToChannel`, `broadcast`, `presence`), and file URLs with transform
 options (`files.getURL(..., { thumb, format, quality })`). The generated
@@ -318,8 +322,8 @@ By default, record events are emitted by the API write handlers — rows changed
 via the SQL console, `psql`, the generated RLS role, or any direct PostgreSQL
 connection are invisible to subscribers. Setting `realtime_wal_enabled: true`
 (env `REALTIME_WAL_ENABLED=1`) closes that gap: Gresbase opens an in-process
-logical replication stream (the Supabase `postgres_changes` capability, without
-a separate service) and sources record events from the WAL itself. Every
+logical replication stream — no separate change-data-capture service — and
+sources record events from the WAL itself. Every
 committed INSERT/UPDATE/DELETE on a collection table reaches subscribers, no
 matter who wrote it — and every event still passes the same per-subscriber rule
 checks (locked collections stay locked; password fields are stripped).
@@ -418,9 +422,8 @@ pure Go.
 ## Resumable uploads (TUS)
 
 Large or flaky-connection uploads can use the [TUS protocol](https://tus.io)
-at `POST /api/v1/files/tus/` — the capability Supabase Storage runs a separate
-container for, served in-process. An upload targets an **existing record's
-file field** and attaches on completion:
+at `POST /api/v1/files/tus/`, served in-process — no upload sidecar to run. An
+upload targets an **existing record's file field** and attaches on completion:
 
 ```js
 import * as tus from 'tus-js-client'

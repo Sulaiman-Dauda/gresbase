@@ -2,7 +2,7 @@
 // data normalization, field picking, and relation expansion — replacing the
 // previous map[string]any approach with a type-safe implementation.
 //
-// Matches PocketBase's Record model capabilities:
+// Record model capabilities:
 //   - Typed getters/setters with automatic type conversion
 //   - Field picking (?fields=id,name,author)
 //   - Relation expansion (?expand=author,category)

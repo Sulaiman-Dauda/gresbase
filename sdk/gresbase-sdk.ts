@@ -1,8 +1,7 @@
 /**
  * Gresbase JavaScript/TypeScript SDK
  *
- * A proper isomorphic SDK for browsers and Node.js, matching PocketBase's JS SDK
- * capabilities. Supports:
+ * A proper isomorphic SDK for browsers and Node.js. Supports:
  *   - Admin and Record authentication
  *   - CRUD operations with real-time subscriptions
  *   - File upload/download
@@ -410,7 +409,7 @@ export class RecordService<T = any> {
     return this.http.get<any>(`/api/v1/collections/${this.collectionName}/auth-methods`)
   }
 
-  /** Complete PocketBase-style OAuth2 record authentication. */
+  /** Complete OAuth2 record authentication. */
   async authWithOAuth2(provider: string, code: string, state: string, redirectURL: string, codeVerifier?: string): Promise<RecordAuthResponse<T>> {
     return this.http.post<RecordAuthResponse<T>>(
       `/api/v1/collections/${this.collectionName}/auth/auth-with-oauth2`,

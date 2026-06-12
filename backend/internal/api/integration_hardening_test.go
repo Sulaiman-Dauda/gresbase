@@ -86,7 +86,7 @@ func TestAPIKeyAuthAndViewerRBAC(t *testing.T) {
 	createResp.Body.Close()
 }
 
-func TestEditorRBACAndPocketBaseAlias(t *testing.T) {
+func TestEditorRBACAndRecordAlias(t *testing.T) {
 	env := newIntegrationEnv(t)
 	_, editorToken := createAdminWithRole(t, env, "editor@example.com", "editor")
 
@@ -122,7 +122,7 @@ func TestEditorRBACAndPocketBaseAlias(t *testing.T) {
 	if aliasCreateResp.StatusCode != http.StatusCreated {
 		var body map[string]any
 		readJSONBody(t, aliasCreateResp, &body)
-		t.Fatalf("expected PocketBase alias record create to work, got %d body=%v", aliasCreateResp.StatusCode, body)
+		t.Fatalf("expected record alias create to work, got %d body=%v", aliasCreateResp.StatusCode, body)
 	}
 	var created map[string]any
 	readJSONBody(t, aliasCreateResp, &created)
@@ -132,7 +132,7 @@ func TestEditorRBACAndPocketBaseAlias(t *testing.T) {
 	if aliasViewResp.StatusCode != http.StatusOK {
 		var body map[string]any
 		readJSONBody(t, aliasViewResp, &body)
-		t.Fatalf("expected PocketBase alias record view to work, got %d body=%v", aliasViewResp.StatusCode, body)
+		t.Fatalf("expected record alias view to work, got %d body=%v", aliasViewResp.StatusCode, body)
 	}
 	aliasViewResp.Body.Close()
 }
@@ -360,7 +360,7 @@ func TestAPIKeyDeleteEnforcesOwnership(t *testing.T) {
 	forbiddenDelete.Body.Close()
 }
 
-func TestPocketBaseOAuth2Routes(t *testing.T) {
+func TestRecordOAuth2Routes(t *testing.T) {
 	env := newIntegrationEnv(t)
 	registerStubOAuthProvider(t, env, "stuboauth")
 	members := &collection.Collection{

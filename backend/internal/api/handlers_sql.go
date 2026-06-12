@@ -8,8 +8,7 @@ import (
 
 // ---------------------------------------------------------------------------
 // SQL console + schema introspection (superuser only).
-// In-process replacement for what Supabase runs a separate postgres-meta
-// container to provide.
+// In-process schema introspection — no separate metadata service.
 // ---------------------------------------------------------------------------
 
 const sqlMaxRows = 1000

@@ -706,7 +706,7 @@ func fileNamesFromValue(value any) []string {
 	}
 }
 
-// Field picking: reduce records to only specified fields (PocketBase-like ?fields=).
+// Field picking: reduce records to only specified fields (?fields=).
 func pickFieldsFromRecords(records []map[string]any, fields string) []map[string]any {
 	if fields == "*" || fields == "" {
 		return records
