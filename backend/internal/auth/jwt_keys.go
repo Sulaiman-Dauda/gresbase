@@ -109,7 +109,9 @@ func loadJWTKeyMaterial(cfg *config.Config) (*jwtKeyMaterial, error) {
 
 	cacheKey := strings.Join([]string{algorithm, keyID, cfg.JWTSecret, cfg.JWTPrivateKey, cfg.JWTPublicKey}, "\x00")
 	if cached, ok := jwtKeyCache.Load(cacheKey); ok {
-		return cached.(*jwtKeyMaterial), nil
+		if material, ok := cached.(*jwtKeyMaterial); ok {
+			return material, nil
+		}
 	}
 
 	material := &jwtKeyMaterial{algorithm: algorithm, keyID: keyID}

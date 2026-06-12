@@ -152,7 +152,10 @@ func (f *GeoPointField) Marshal(value any) (any, error) {
 	if gp == nil {
 		return nil, nil
 	}
-	pt := gp.(*GeoPoint)
+	pt, ok := gp.(*GeoPoint)
+	if !ok {
+		return nil, fmt.Errorf("geo point: unexpected validated type %T", gp)
+	}
 
 	if f.UseJSON {
 		b, _ := json.Marshal(pt)
@@ -180,14 +183,16 @@ func (f *GeoPointField) Unmarshal(raw any) (any, error) {
 				gp = &GeoPoint{Latitude: lat, Longitude: lon}
 			}
 		} else {
-			// Try JSON
-			json.Unmarshal([]byte(v), &gp)
+			// Try JSON; leaves gp nil if malformed
+			_ = json.Unmarshal([]byte(v), &gp)
 		}
 	case []byte:
-		json.Unmarshal(v, &gp)
+		// stored JSON; leaves gp nil if malformed
+		_ = json.Unmarshal(v, &gp)
 	default:
 		b, _ := json.Marshal(v)
-		json.Unmarshal(b, &gp)
+		// best-effort; leaves gp nil if malformed
+		_ = json.Unmarshal(b, &gp)
 	}
 
 	if gp == nil {

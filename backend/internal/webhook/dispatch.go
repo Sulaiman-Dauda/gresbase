@@ -193,7 +193,7 @@ func (s *Service) attempt(ctx context.Context, hook *Webhook, event string, body
 		return d
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body) // drain body for connection reuse
 
 	d.StatusCode = resp.StatusCode
 	d.Success = resp.StatusCode >= 200 && resp.StatusCode < 300

@@ -85,7 +85,7 @@ func New(cfg *config.Config) (*DB, error) {
 	poolCfg, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
 		if embedded != nil {
-			embedded.Stop()
+			_ = embedded.Stop() // best-effort shutdown on init failure
 		}
 		return nil, fmt.Errorf("failed to parse database URL: %w", err)
 	}
@@ -100,7 +100,7 @@ func New(cfg *config.Config) (*DB, error) {
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		if embedded != nil {
-			embedded.Stop()
+			_ = embedded.Stop() // best-effort shutdown on init failure
 		}
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
 	}
@@ -109,7 +109,7 @@ func New(cfg *config.Config) (*DB, error) {
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		if embedded != nil {
-			embedded.Stop()
+			_ = embedded.Stop() // best-effort shutdown on init failure
 		}
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
@@ -171,7 +171,7 @@ func (db *DB) Close() {
 		db.readPool.Close()
 	}
 	if db.embedded != nil {
-		db.embedded.Stop()
+		_ = db.embedded.Stop() // best-effort shutdown
 	}
 }
 
@@ -262,7 +262,7 @@ func (db *DB) RunInTransactionContext(ctx context.Context, fn func(txCtx context
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
 
 	txCtx := ContextWithTx(ctx, tx)
 	state, _ := txStateFromContext(txCtx)

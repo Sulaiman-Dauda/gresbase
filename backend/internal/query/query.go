@@ -329,7 +329,9 @@ func (b *Builder) Create(ctx context.Context, record map[string]any) (map[string
 	}
 
 	var result map[string]any
-	json.Unmarshal(raw, &result)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("create record: decode result: %w", err)
+	}
 	return result, nil
 }
 
@@ -381,7 +383,9 @@ func (b *Builder) Update(ctx context.Context, id string, record map[string]any) 
 	}
 
 	var result map[string]any
-	json.Unmarshal(raw, &result)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("update record: decode result: %w", err)
+	}
 	return result, nil
 }
 

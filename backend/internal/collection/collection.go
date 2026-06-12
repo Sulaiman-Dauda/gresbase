@@ -333,9 +333,10 @@ func (s *Service) scanCollection(ctx context.Context, sql string, args ...any) (
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal(schemaJSON, &coll.Schema)
-	json.Unmarshal(indexesJSON, &coll.Indexes)
-	json.Unmarshal(optionsJSON, &coll.Options)
+	// stored JSON; defaults to zero value if malformed
+	_ = json.Unmarshal(schemaJSON, &coll.Schema)
+	_ = json.Unmarshal(indexesJSON, &coll.Indexes)
+	_ = json.Unmarshal(optionsJSON, &coll.Options)
 	s.hydrateCollectionMetadata(ctx, coll)
 	return coll, nil
 }
@@ -352,9 +353,10 @@ func (s *Service) scanCollectionRow(rows pgx.Rows) *Collection {
 	); err != nil {
 		return nil
 	}
-	json.Unmarshal(schemaJSON, &coll.Schema)
-	json.Unmarshal(indexesJSON, &coll.Indexes)
-	json.Unmarshal(optionsJSON, &coll.Options)
+	// stored JSON; defaults to zero value if malformed
+	_ = json.Unmarshal(schemaJSON, &coll.Schema)
+	_ = json.Unmarshal(indexesJSON, &coll.Indexes)
+	_ = json.Unmarshal(optionsJSON, &coll.Options)
 	return coll
 }
 

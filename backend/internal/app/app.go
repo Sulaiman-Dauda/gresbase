@@ -245,7 +245,9 @@ func (app *App) Bootstrap() error {
 	}
 
 	// Initialize OAuth tables
-	app.oauthService.EnsureTable(context.Background())
+	if err := app.oauthService.EnsureTable(context.Background()); err != nil {
+		log.Warn().Err(err).Msg("Failed to ensure OAuth table")
+	}
 	app.collections = collection.NewService(app.db)
 
 	storageSvc, err := storage.NewService(app.cfg)
@@ -525,7 +527,9 @@ func (app *App) Shutdown() {
 		app.realtimeHub.Shutdown()
 	}
 	if app.apiServer != nil {
-		app.apiServer.Shutdown()
+		if err := app.apiServer.Shutdown(); err != nil {
+			log.Warn().Err(err).Msg("API server shutdown error")
+		}
 	}
 	if app.db != nil {
 		app.db.Close()
@@ -533,7 +537,9 @@ func (app *App) Shutdown() {
 
 	// Fire terminate event
 	termEvent := &events.TerminateEvent{App: app}
-	app.onTerminate.Trigger(termEvent, func(e events.Event) error { return termEvent.Next() })
+	if err := app.onTerminate.Trigger(termEvent, func(e events.Event) error { return termEvent.Next() }); err != nil {
+		log.Warn().Err(err).Msg("Terminate event hook error")
+	}
 
 	log.Info().Msg("Gresbase shutdown complete")
 }

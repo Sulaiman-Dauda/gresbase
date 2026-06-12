@@ -58,12 +58,15 @@ func (r *Registry) CreateFromSchema(def SchemaField) (Field, error) {
 	}
 
 	// Apply base properties
-	bf := f.(interface {
+	bf, ok := f.(interface {
 		SetRequired(bool)
 		SetUnique(bool)
 		SetSystem(bool)
 		SetID(string)
 	})
+	if !ok {
+		return nil, fmt.Errorf("field type %q does not support base properties", def.Type)
+	}
 	bf.SetRequired(def.Required)
 	bf.SetUnique(def.Unique)
 	bf.SetSystem(def.System)

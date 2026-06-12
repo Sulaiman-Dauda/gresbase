@@ -51,7 +51,11 @@ func freePort(t testing.TB) int {
 		t.Fatalf("listen free port: %v", err)
 	}
 	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address is not *net.TCPAddr: %T", ln.Addr())
+	}
+	return addr.Port
 }
 
 func runCmd(t testing.TB, cmd *exec.Cmd) {

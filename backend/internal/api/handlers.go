@@ -47,7 +47,7 @@ func requireAPIKeyPermission(w http.ResponseWriter, r *http.Request, permission 
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data) // best-effort write to response
 }
 
 func writeOK(w http.ResponseWriter, data any) {

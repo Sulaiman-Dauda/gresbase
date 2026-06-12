@@ -166,11 +166,14 @@ func (s *MFAService) ValidateToken(ctx context.Context, adminID, code string) (b
 				// Compare hash
 				codeHash := sha256Hash(code)
 				if bc == codeHash {
-					// Remove used backup code
+					// Remove used backup code. If this write fails we must not
+					// accept the code, otherwise it could be reused.
 					backupCodes = append(backupCodes[:i], backupCodes[i+1:]...)
 					newJSON, _ := json.Marshal(backupCodes)
-					s.exec(ctx, "UPDATE _mfa_secrets SET backup_codes = $1 WHERE admin_id = $2",
-						newJSON, adminID)
+					if _, err := s.exec(ctx, "UPDATE _mfa_secrets SET backup_codes = $1 WHERE admin_id = $2",
+						newJSON, adminID); err != nil {
+						return false, fmt.Errorf("consume backup code: %w", err)
+					}
 					return true, nil
 				}
 			}

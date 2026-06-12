@@ -633,7 +633,9 @@ func (p *DiscordProvider) ExchangeCode(ctx context.Context, code, redirectURL st
 		AccessToken string `json:"access_token"`
 		Error       string `json:"error"`
 	}
-	json.Unmarshal(body, &tokenResp)
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return nil, fmt.Errorf("discord token response: %w", err)
+	}
 	if tokenResp.Error != "" {
 		return nil, fmt.Errorf("discord error: %s", tokenResp.Error)
 	}
@@ -656,7 +658,9 @@ func (p *DiscordProvider) ExchangeCode(ctx context.Context, code, redirectURL st
 		Avatar        string `json:"avatar"`
 		Discriminator string `json:"discriminator"`
 	}
-	json.Unmarshal(body2, &dcUser)
+	if err := json.Unmarshal(body2, &dcUser); err != nil {
+		return nil, fmt.Errorf("discord user response: %w", err)
+	}
 
 	avatarURL := ""
 	if dcUser.Avatar != "" {

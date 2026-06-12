@@ -39,7 +39,9 @@ type BackupService struct {
 // NewBackupService creates a backup service.
 func NewBackupService(db *database.DB, cfg *config.Config) *BackupService {
 	dir := filepath.Join(cfg.DataDir, "backups")
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Warn().Err(err).Str("dir", dir).Msg("failed to create backups directory")
+	}
 	return &BackupService{
 		db:         db,
 		cfg:        cfg,
@@ -329,7 +331,9 @@ func (s *BackupService) dumpData(ctx context.Context, zw *zip.Writer) (int, int,
 			if err != nil {
 				return collectionCount, recordCount, err
 			}
-			w.Write(data)
+			if _, err := w.Write(data); err != nil {
+				return collectionCount, recordCount, err
+			}
 			collectionCount++
 			recordCount += count
 		}

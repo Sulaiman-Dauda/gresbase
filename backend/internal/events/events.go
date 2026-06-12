@@ -3,8 +3,17 @@ package events
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"strconv"
 	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/rs/zerolog/log"
 )
+
+// handlerIDCounter guarantees uniqueness for the fallback handler ID path when
+// crypto/rand is unavailable.
+var handlerIDCounter uint64
 
 // Priority levels for hooks.
 const (
@@ -208,7 +217,13 @@ func (h *Hook) Len() int {
 
 func generateHandlerID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fall back to a monotonic, collision-free ID rather than risk a
+		// duplicate from a half-filled buffer.
+		log.Error().Err(err).Msg("crypto/rand unavailable; using fallback handler ID")
+		return "h" + strconv.FormatInt(time.Now().UnixNano(), 36) +
+			strconv.FormatUint(atomic.AddUint64(&handlerIDCounter, 1), 36)
+	}
 	return hex.EncodeToString(b)
 }
 

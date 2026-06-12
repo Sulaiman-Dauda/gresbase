@@ -1120,7 +1120,7 @@ func (h *Hub) handleBroadcast(req *BroadcastRequest) {
 					existing, _ := client.Get(key)
 					var messages []*RealtimeMessage
 					if existing != nil {
-						messages = existing.([]*RealtimeMessage)
+						messages, _ = existing.([]*RealtimeMessage)
 					}
 					messages = append(messages, msg)
 					client.Set(key, messages)
@@ -1151,7 +1151,7 @@ func (h *Hub) FlushDryCache(key string) {
 		if cached, ok := client.Get(key); ok {
 			if messages, ok := cached.([]*RealtimeMessage); ok {
 				for _, msg := range messages {
-					client.Send(msg)
+					_ = client.Send(msg) // realtime delivery is lossy by design
 					atomic.AddInt64(&h.stats.MessagesSent, 1)
 				}
 			}
@@ -1284,7 +1284,8 @@ func (c *WSClient) Close() {
 		return // already closed
 	}
 	close(c.send)
-	c.conn.WriteMessage(websocket.CloseMessage,
+	// best-effort close frame; connection is being torn down regardless
+	_ = c.conn.WriteMessage(websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseGoingAway, "bye"))
 	c.conn.Close()
 	c.hub.Unregister(c)
@@ -1345,7 +1346,8 @@ func (c *WSClient) WritePump() {
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				// best-effort close frame on a closed send channel
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
@@ -1353,13 +1355,13 @@ func (c *WSClient) WritePump() {
 			if err != nil {
 				return
 			}
-			w.Write(message)
+			_, _ = w.Write(message) // errors surface on w.Close() below
 
 			// Drain any remaining messages in the buffer
 			n := len(c.send)
 			for i := 0; i < n; i++ {
-				w.Write([]byte("\n"))
-				w.Write(<-c.send)
+				_, _ = w.Write([]byte("\n")) // errors surface on w.Close() below
+				_, _ = w.Write(<-c.send)
 			}
 
 			if err := w.Close(); err != nil {
@@ -1392,8 +1394,8 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		client.SetAuthRecord(auth)
 	}
 
-	// Send connection established
-	client.Send(&RealtimeMessage{
+	// Send connection established (lossy by design)
+	_ = client.Send(&RealtimeMessage{
 		ClientID:  client.ID(),
 		Event:     "connection:established",
 		Timestamp: time.Now().UnixMilli(),
@@ -1637,8 +1639,8 @@ func (h *Hub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 
 	h.Register(client)
 
-	// Send connection established
-	client.Send(&RealtimeMessage{
+	// Send connection established (lossy by design)
+	_ = client.Send(&RealtimeMessage{
 		ClientID:  client.ID(),
 		Event:     "connection:established",
 		Timestamp: time.Now().UnixMilli(),
@@ -1795,7 +1797,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if v != nil {
-		json.NewEncoder(w).Encode(v)
+		_ = json.NewEncoder(w).Encode(v) // best-effort write to response
 	}
 }
 

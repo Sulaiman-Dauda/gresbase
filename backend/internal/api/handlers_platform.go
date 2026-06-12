@@ -198,7 +198,7 @@ func (h *Handlers) LogsList(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handlers) APIKeysList(w http.ResponseWriter, r *http.Request) {
-	adminID := r.Context().Value(contextKeyAdminID).(string)
+	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 	event := &events.APIKeyRequestEvent{App: h.app, Request: r, Info: toEventRequestInfo(r), Action: "list"}
 	var keys []map[string]any
 	if err := h.app.OnAPIKeyRequest().Trigger(event, func(e events.Event) error {
@@ -252,7 +252,7 @@ func (h *Handlers) APIKeysCreate(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, err)
 		return
 	}
-	adminID := r.Context().Value(contextKeyAdminID).(string)
+	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 	event := &events.APIKeyRequestEvent{App: h.app, Request: r, Info: toEventRequestInfoWithBody(r, form), Action: "create", Name: form.Name}
 	var key string
 	var apiKey *auth.APIKey

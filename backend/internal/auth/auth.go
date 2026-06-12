@@ -1065,10 +1065,12 @@ func (s *Service) RateLimitAuthRequest(ctx context.Context, action, identifier s
 		return fmt.Errorf("rate limit exceeded for %s", action)
 	}
 
-	// Record this attempt
-	s.exec(ctx,
+	// Record this attempt (best-effort; rate limiting fails open)
+	if _, err := s.exec(ctx,
 		`INSERT INTO _rate_limits (key, hits, window_start) VALUES ($1, 1, NOW())`,
-		"auth:"+action+":"+identifier)
+		"auth:"+action+":"+identifier); err != nil {
+		log.Warn().Err(err).Str("action", action).Msg("failed to record rate limit attempt")
+	}
 
 	return nil
 }

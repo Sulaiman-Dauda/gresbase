@@ -107,14 +107,20 @@ func (p *ImageProcessor) ThumbnailWithFormat(r io.Reader, size, crop, outFormat 
 	var buf bytes.Buffer
 	switch target {
 	case "jpeg":
-		jpeg.Encode(&buf, dst, &jpeg.Options{Quality: q})
+		if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: q}); err != nil {
+			return nil, "", fmt.Errorf("encode jpeg: %w", err)
+		}
 		format = "jpeg"
 	case "png":
-		png.Encode(&buf, dst)
+		if err := png.Encode(&buf, dst); err != nil {
+			return nil, "", fmt.Errorf("encode png: %w", err)
+		}
 		format = "png"
 	default:
 		// Default to JPEG for formats without an encoder (gif, webp sources)
-		jpeg.Encode(&buf, dst, &jpeg.Options{Quality: q})
+		if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: q}); err != nil {
+			return nil, "", fmt.Errorf("encode jpeg: %w", err)
+		}
 		format = "jpeg"
 	}
 
@@ -133,9 +139,13 @@ func (p *ImageProcessor) Resize(r io.Reader, width, height int) ([]byte, string,
 
 	var buf bytes.Buffer
 	if strings.ToLower(format) == "png" {
-		png.Encode(&buf, dst)
+		if err := png.Encode(&buf, dst); err != nil {
+			return nil, "", fmt.Errorf("encode png: %w", err)
+		}
 	} else {
-		jpeg.Encode(&buf, dst, &jpeg.Options{Quality: p.jpegQuality})
+		if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: p.jpegQuality}); err != nil {
+			return nil, "", fmt.Errorf("encode jpeg: %w", err)
+		}
 		format = "jpeg"
 	}
 
@@ -257,10 +267,14 @@ func parseSize(size string) (int, int, error) {
 
 	var width, height int
 	if parts[0] != "" {
-		fmt.Sscanf(parts[0], "%d", &width)
+		if _, err := fmt.Sscanf(parts[0], "%d", &width); err != nil {
+			return 0, 0, fmt.Errorf("invalid width in size %q: %w", size, err)
+		}
 	}
 	if parts[1] != "" {
-		fmt.Sscanf(parts[1], "%d", &height)
+		if _, err := fmt.Sscanf(parts[1], "%d", &height); err != nil {
+			return 0, 0, fmt.Errorf("invalid height in size %q: %w", size, err)
+		}
 	}
 
 	if width < 0 {

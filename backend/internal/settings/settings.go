@@ -199,11 +199,12 @@ func (s *Service) Get(ctx context.Context) (*Settings, error) {
 		return settings.clone(), nil
 	}
 
-	json.Unmarshal(smtpJSON, &settings.SMTP)
-	json.Unmarshal(s3JSON, &settings.S3)
-	json.Unmarshal(securityJSON, &settings.Security)
-	json.Unmarshal(emailTemplatesJSON, &settings.EmailTemplates)
-	json.Unmarshal(metaJSON, &settings.Meta)
+	// stored JSON; defaults to zero value if malformed
+	_ = json.Unmarshal(smtpJSON, &settings.SMTP)
+	_ = json.Unmarshal(s3JSON, &settings.S3)
+	_ = json.Unmarshal(securityJSON, &settings.Security)
+	_ = json.Unmarshal(emailTemplatesJSON, &settings.EmailTemplates)
+	_ = json.Unmarshal(metaJSON, &settings.Meta)
 
 	s.settings = settings
 	s.cached = true

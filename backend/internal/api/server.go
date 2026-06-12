@@ -542,7 +542,8 @@ func (s *Server) Shutdown() error {
 
 // Router returns the chi router for internal sub-requests.
 func (s *Server) Router() *chi.Mux {
-	return s.router.(*chi.Mux)
+	mux, _ := s.router.(*chi.Mux)
+	return mux
 }
 
 // OpenAPISpec generates the current OpenAPI spec from the live core and

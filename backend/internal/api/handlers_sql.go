@@ -52,7 +52,7 @@ func (h *Handlers) SQLExecute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
 	if _, err := tx.Exec(ctx, "SET TRANSACTION "+mode); err != nil {
 		writeError(w, 500, err.Error())
 		return

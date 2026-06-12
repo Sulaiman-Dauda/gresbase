@@ -640,7 +640,11 @@ func (s *OAuthService) ExchangeCodeWithVerifier(ctx context.Context, providerNam
 		return nil, fmt.Errorf("oauth code verifier mismatch")
 	}
 
-	s.exec(ctx, "DELETE FROM _oauth_states WHERE provider = $1 AND state = $2", providerName, state)
+	// Consume the single-use state. If the delete fails we abort rather than
+	// risk the state being replayed.
+	if _, err := s.exec(ctx, "DELETE FROM _oauth_states WHERE provider = $1 AND state = $2", providerName, state); err != nil {
+		return nil, fmt.Errorf("consume oauth state: %w", err)
+	}
 
 	verifier := storedState.CodeVerifier
 	if verifier == "" {

@@ -184,8 +184,10 @@ func (s *VerificationService) ConfirmPasswordReset(ctx context.Context, token, n
 		return fmt.Errorf("update password: %w", err)
 	}
 
-	// Delete used token
-	s.exec(ctx, "DELETE FROM _password_resets WHERE token_hash = $1", tokenHash)
+	// Delete used token (best-effort; token is single-use and expiry-bound)
+	if _, err := s.exec(ctx, "DELETE FROM _password_resets WHERE token_hash = $1", tokenHash); err != nil {
+		log.Warn().Err(err).Msg("failed to delete used password reset token")
+	}
 
 	log.Info().Str("admin_id", adminID).Msg("Password reset confirmed")
 	return nil
@@ -248,8 +250,10 @@ func (s *VerificationService) ConfirmEmailChange(ctx context.Context, token stri
 		return fmt.Errorf("update email: %w", err)
 	}
 
-	// Clean up
-	s.exec(ctx, "DELETE FROM _email_changes WHERE admin_id = $1", adminID)
+	// Clean up (best-effort; token is single-use and expiry-bound)
+	if _, err := s.exec(ctx, "DELETE FROM _email_changes WHERE admin_id = $1", adminID); err != nil {
+		log.Warn().Err(err).Msg("failed to delete used email change token")
+	}
 
 	log.Info().Str("admin_id", adminID).Str("new_email", newEmail).Msg("Email change confirmed")
 	return nil
@@ -314,8 +318,10 @@ func (s *VerificationService) VerifyMagicLink(ctx context.Context, token string)
 		return "", fmt.Errorf("invalid or expired magic link")
 	}
 
-	// Delete used token
-	s.exec(ctx, "DELETE FROM _magic_links WHERE token_hash = $1", tokenHash)
+	// Delete used token (best-effort; token is single-use and expiry-bound)
+	if _, err := s.exec(ctx, "DELETE FROM _magic_links WHERE token_hash = $1", tokenHash); err != nil {
+		log.Warn().Err(err).Msg("failed to delete used magic link token")
+	}
 
 	return adminID, nil
 }

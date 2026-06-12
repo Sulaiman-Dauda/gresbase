@@ -146,7 +146,10 @@ func (h *Handlers) FileUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.ParseMultipartForm(50 << 20)
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
+		writeError(w, 400, "Invalid multipart form")
+		return
+	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		writeError(w, 400, "No file provided")

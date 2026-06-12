@@ -453,8 +453,9 @@ func (ras *RecordAuthService) findAuthCollection(ctx context.Context, name strin
 	}
 
 	info := &authCollectionInfo{ID: id, Options: map[string]any{}}
-	json.Unmarshal(schemaJSON, &info.Schema)
-	json.Unmarshal(optionsJSON, &info.Options)
+	// stored JSON; defaults to zero value if malformed
+	_ = json.Unmarshal(schemaJSON, &info.Schema)
+	_ = json.Unmarshal(optionsJSON, &info.Options)
 	return info, nil
 }
 

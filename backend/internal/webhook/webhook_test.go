@@ -129,7 +129,10 @@ func TestValidateURL(t *testing.T) {
 }
 
 func TestGenerateAndMaskSecret(t *testing.T) {
-	secret := generateSecret()
+	secret, err := generateSecret()
+	if err != nil {
+		t.Fatalf("generateSecret: %v", err)
+	}
 	if !strings.HasPrefix(secret, "whsec_") {
 		t.Errorf("secret %q missing whsec_ prefix", secret)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/gresbase/gresbase/internal/ctxkeys"
 	"github.com/gresbase/gresbase/internal/events"
 	"github.com/gresbase/gresbase/internal/forms"
+	"github.com/rs/zerolog/log"
 )
 
 // ---------------------------------------------------------------------------
@@ -182,7 +183,9 @@ func (h *Handlers) RecordAuthOTPRequest(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if h.app.Mailer() != nil {
-		h.app.Mailer().SendOTP(form.Email, code)
+		if err := h.app.Mailer().SendOTP(form.Email, code); err != nil {
+			log.Warn().Err(err).Msg("failed to send OTP email")
+		}
 	}
 
 	writeOK(w, map[string]any{"otpId": otpID, "message": "OTP sent"})
@@ -341,7 +344,7 @@ func (h *Handlers) RecordAuthRefresh(w http.ResponseWriter, r *http.Request) {
 
 // RecordAuthImpersonate allows an admin to impersonate a record (generate tokens as that record).
 func (h *Handlers) RecordAuthImpersonate(w http.ResponseWriter, r *http.Request) {
-	adminID := r.Context().Value(contextKeyAdminID).(string)
+	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 	collName := chi.URLParam(r, "collection")
 	recordID := chi.URLParam(r, "recordId")
 
@@ -386,7 +389,9 @@ func (h *Handlers) RecordPasswordResetRequest(w http.ResponseWriter, r *http.Req
 	}
 
 	if h.app.Mailer() != nil {
-		h.app.Mailer().SendPasswordReset(form.Email, token)
+		if err := h.app.Mailer().SendPasswordReset(form.Email, token); err != nil {
+			log.Warn().Err(err).Msg("failed to send password reset email")
+		}
 	}
 
 	writeOK(w, map[string]any{"message": "If the email exists, a reset email has been sent"})
@@ -451,7 +456,9 @@ func (h *Handlers) RecordVerificationRequest(w http.ResponseWriter, r *http.Requ
 	}
 
 	if h.app.Mailer() != nil {
-		h.app.Mailer().SendVerification(form.Email, token)
+		if err := h.app.Mailer().SendVerification(form.Email, token); err != nil {
+			log.Warn().Err(err).Msg("failed to send verification email")
+		}
 	}
 
 	writeOK(w, map[string]any{"message": "Verification email sent"})
@@ -511,7 +518,9 @@ func (h *Handlers) RecordEmailChangeRequest(w http.ResponseWriter, r *http.Reque
 	}
 
 	if h.app.Mailer() != nil {
-		h.app.Mailer().SendEmailChange(form.NewEmail, token)
+		if err := h.app.Mailer().SendEmailChange(form.NewEmail, token); err != nil {
+			log.Warn().Err(err).Msg("failed to send email change email")
+		}
 	}
 
 	writeOK(w, map[string]any{"message": "Confirmation email sent to new address"})

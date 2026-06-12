@@ -55,14 +55,14 @@ func migrationsCommand(gb *gresbase.Gresbase) *cobra.Command {
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 2, 4, 2, ' ', 0)
 			defer w.Flush()
-			w.Write([]byte("STATUS\tAPPLIED AT\tFILE\n"))
+			_, _ = w.Write([]byte("STATUS\tAPPLIED AT\tFILE\n")) // best-effort write to stdout
 			for _, s := range statuses {
 				status, appliedAt := "pending", "-"
 				if s.Applied {
 					status = "applied"
 					appliedAt = s.AppliedAt.Format("2006-01-02 15:04:05")
 				}
-				w.Write([]byte(status + "\t" + appliedAt + "\t" + s.Filename + "\n"))
+				_, _ = w.Write([]byte(status + "\t" + appliedAt + "\t" + s.Filename + "\n")) // best-effort write to stdout
 			}
 			return nil
 		},

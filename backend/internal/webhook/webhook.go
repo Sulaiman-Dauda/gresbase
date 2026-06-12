@@ -129,10 +129,12 @@ func MaskSecret(secret string) string {
 	return secret[:12] + "…"
 }
 
-func generateSecret() string {
+func generateSecret() (string, error) {
 	b := make([]byte, 32)
-	rand.Read(b)
-	return "whsec_" + hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate webhook secret: %w", err)
+	}
+	return "whsec_" + hex.EncodeToString(b), nil
 }
 
 // Create persists a new webhook. If no secret is provided a random one is
@@ -146,7 +148,11 @@ func (s *Service) Create(ctx context.Context, hook *Webhook) (*Webhook, error) {
 	}
 	hook.ID = uuid.New().String()
 	if hook.Secret == "" {
-		hook.Secret = generateSecret()
+		secret, err := generateSecret()
+		if err != nil {
+			return nil, err
+		}
+		hook.Secret = secret
 	}
 	if len(hook.Events) == 0 {
 		hook.Events = []string{"*"}
@@ -307,8 +313,9 @@ func scanWebhook(row scannable) (*Webhook, error) {
 		&hook.Enabled, &headersJSON, &hook.CreatedAt, &hook.UpdatedAt); err != nil {
 		return nil, err
 	}
-	json.Unmarshal(eventsJSON, &hook.Events)
-	json.Unmarshal(collectionsJSON, &hook.Collections)
-	json.Unmarshal(headersJSON, &hook.Headers)
+	// stored JSON; defaults to zero value if malformed
+	_ = json.Unmarshal(eventsJSON, &hook.Events)
+	_ = json.Unmarshal(collectionsJSON, &hook.Collections)
+	_ = json.Unmarshal(headersJSON, &hook.Headers)
 	return hook, nil
 }

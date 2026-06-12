@@ -287,7 +287,8 @@ func (s *Scheduler) RunJob(ctx context.Context, id string) error {
 
 	now := time.Now()
 	var data map[string]any
-	json.Unmarshal([]byte(job.Data), &data)
+	// stored JSON; defaults to nil map if malformed
+	_ = json.Unmarshal([]byte(job.Data), &data)
 
 	// Record run start
 	var runID int64
@@ -391,7 +392,9 @@ func (s *Scheduler) checkAndRun() {
 					}
 				}()
 				ctx := context.Background()
-				s.RunJob(ctx, j.ID)
+				if err := s.RunJob(ctx, j.ID); err != nil {
+					log.Warn().Err(err).Str("name", j.Name).Str("id", j.ID).Msg("Scheduled job run failed")
+				}
 			}(job)
 		}
 	}

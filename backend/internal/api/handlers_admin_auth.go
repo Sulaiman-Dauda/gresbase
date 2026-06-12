@@ -202,7 +202,9 @@ func (h *Handlers) OTPRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Send OTP via email
 	if h.app.Mailer() != nil {
-		h.app.Mailer().SendOTP(form.Email, otp.Code)
+		if err := h.app.Mailer().SendOTP(form.Email, otp.Code); err != nil {
+			log.Warn().Err(err).Msg("failed to send OTP email")
+		}
 	}
 
 	writeOK(w, map[string]any{"message": "OTP sent", "otpId": otp.ID})
@@ -265,7 +267,9 @@ func (h *Handlers) MagicLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.app.Mailer() != nil {
-		h.app.Mailer().SendMagicLink(form.Email, token)
+		if err := h.app.Mailer().SendMagicLink(form.Email, token); err != nil {
+			log.Warn().Err(err).Msg("failed to send magic link email")
+		}
 	}
 
 	writeOK(w, map[string]any{"message": "Magic link sent"})
@@ -333,7 +337,9 @@ func (h *Handlers) PasswordResetRequest(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if h.app.Mailer() != nil {
-		h.app.Mailer().SendPasswordReset(form.Email, token)
+		if err := h.app.Mailer().SendPasswordReset(form.Email, token); err != nil {
+			log.Warn().Err(err).Msg("failed to send password reset email")
+		}
 	}
 
 	writeOK(w, map[string]any{"message": "If the email exists, a reset link has been sent"})
@@ -388,7 +394,9 @@ func (h *Handlers) VerificationRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.app.Mailer() != nil {
-		h.app.Mailer().SendVerification(form.Email, token)
+		if err := h.app.Mailer().SendVerification(form.Email, token); err != nil {
+			log.Warn().Err(err).Msg("failed to send verification email")
+		}
 	}
 
 	writeOK(w, map[string]any{"message": "Verification email sent"})
@@ -431,7 +439,7 @@ func (h *Handlers) EmailChangeRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	adminID := r.Context().Value(contextKeyAdminID).(string)
+	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 	event := &events.AdminAuthRequestEvent{App: h.app, Request: r, Info: toEventRequestInfoWithBody(r, form), Action: "email_change_request", Provider: "password", NewEmail: form.NewEmail}
 	var token string
 	if err := h.app.OnAdminAuthRequest().Trigger(event, func(e events.Event) error {
@@ -444,7 +452,9 @@ func (h *Handlers) EmailChangeRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.app.Mailer() != nil {
-		h.app.Mailer().SendEmailChange(form.NewEmail, token)
+		if err := h.app.Mailer().SendEmailChange(form.NewEmail, token); err != nil {
+			log.Warn().Err(err).Msg("failed to send email change email")
+		}
 	}
 
 	writeOK(w, map[string]any{"message": "Confirmation email sent to new address"})
@@ -477,7 +487,7 @@ func (h *Handlers) EmailChangeConfirm(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handlers) AdminMe(w http.ResponseWriter, r *http.Request) {
-	adminID := r.Context().Value(contextKeyAdminID).(string)
+	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 	event := &events.AdminUserRequestEvent{App: h.app, Request: r, Info: toEventRequestInfo(r), Action: "me", TargetAdminID: adminID}
 	var admin *auth.AdminUser
 	if err := h.app.OnAdminUserRequest().Trigger(event, func(e events.Event) error {
@@ -492,7 +502,7 @@ func (h *Handlers) AdminMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) AdminUpdateMe(w http.ResponseWriter, r *http.Request) {
-	adminID := r.Context().Value(contextKeyAdminID).(string)
+	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 	var form forms.AdminUpsertForm
 	if err := decodeJSONBody(r, &form); err != nil {
 		writeError(w, 400, "Invalid body")
@@ -609,7 +619,7 @@ func (h *Handlers) AdminCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "Failed to create admin: "+err.Error())
 		return
 	}
-	adminID := r.Context().Value(contextKeyAdminID).(string)
+	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 	h.app.Auth().RecordAudit(r.Context(), adminID, "admin.create", "_admins", admin.ID, map[string]any{"email": admin.Email, "role": admin.Role}, r)
 	writeJSON(w, 201, sanitizeAdmin(admin))
 }

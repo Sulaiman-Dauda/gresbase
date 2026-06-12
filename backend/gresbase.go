@@ -59,6 +59,7 @@ import (
 	"github.com/gresbase/gresbase/internal/buildinfo"
 	"github.com/gresbase/gresbase/internal/config"
 	"github.com/gresbase/gresbase/internal/events"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
@@ -172,7 +173,10 @@ func (gb *Gresbase) Execute() error {
 	}()
 
 	go func() {
-		gb.root.Execute()
+		if err := gb.root.Execute(); err != nil {
+			// cobra prints its own errors; log for visibility.
+			log.Error().Err(err).Msg("command execution failed")
+		}
 		done <- true
 	}()
 
