@@ -372,7 +372,7 @@ function CollectionsPageContent() {
                     {selectedCollection.system ? <Badge variant="secondary">system</Badge> : null}
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    PocketBase-shaped workbench on PostgreSQL — {selectedCollection.schema.length} field
+                    Gresbase workbench — {selectedCollection.schema.length} field
                     {selectedCollection.schema.length !== 1 ? 's' : ''}, {countRules(selectedCollection)} access rule
                     {countRules(selectedCollection) !== 1 ? 's' : ''}.
                   </p>
@@ -832,7 +832,7 @@ function CollectionsHome({
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Collections</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Gresbase should feel like PocketBase on PostgreSQL: collections first, records immediately underneath, everything else in support.
+            Collections first, records immediately underneath, everything else in support.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={onDownloadSdk} disabled={downloadingSdk}>

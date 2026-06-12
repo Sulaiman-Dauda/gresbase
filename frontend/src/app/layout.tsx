@@ -22,7 +22,7 @@ export const metadata: Metadata = {
     default: 'Gresbase',
     template: '%s — Gresbase',
   },
-  description: 'Modern Backend Platform — PocketBase meets Supabase with Vercel polish',
+  description: 'Open-source backend platform — collections, auth, files, and realtime on PostgreSQL.',
 }
 
 export const viewport: Viewport = {

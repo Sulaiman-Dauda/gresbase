@@ -178,7 +178,7 @@ function AppLayoutShell({ children }: { children: React.ReactNode }) {
             {!collapsed && (
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold">Gresbase</div>
-                <div className="truncate text-[11px] text-muted-foreground">PostgreSQL PocketBase</div>
+                <div className="truncate text-[11px] text-muted-foreground">Backend Platform</div>
               </div>
             )}
           </button>

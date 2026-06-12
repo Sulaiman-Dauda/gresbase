@@ -313,7 +313,7 @@ export function AuthTools({ collection }: { collection: Collection }) {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              These actions hit the real record auth endpoints for this collection. They are the minimum auth tooling a PostgreSQL PocketBase clone needs in the workbench.
+              These actions hit the real record auth endpoints for this collection — the full Gresbase auth tooling available directly in the workbench.
             </p>
           </CardContent>
         </Card>
