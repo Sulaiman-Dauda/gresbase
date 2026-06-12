@@ -13,11 +13,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func (h *Handlers) rlsCollections(r *http.Request) ([]*collection.Collection, error) {
-	tenantID, _ := r.Context().Value(contextKeyTenantID).(string)
-	if tenantID == "" {
-		tenantID = "default"
-	}
-	return h.app.Collections().ListCollections(r.Context(), tenantID)
+	return h.app.Collections().ListCollections(r.Context())
 }
 
 func (h *Handlers) rlsOptions(r *http.Request) collection.RLSOptions {

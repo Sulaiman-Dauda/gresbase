@@ -106,9 +106,8 @@ func TestWAL_SQLChangesReachSubscribers(t *testing.T) {
 
 	public := ""
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     "wal_posts",
-		Type:     collection.TypeBase,
+		Name: "wal_posts",
+		Type: collection.TypeBase,
 		Schema: []collection.SchemaField{
 			{Name: "title", Type: collection.FieldText},
 			{Name: "count", Type: collection.FieldNumber},
@@ -198,9 +197,8 @@ func TestWAL_RuleEnforcementStillApplies(t *testing.T) {
 	ctx := context.Background()
 
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     "wal_secrets",
-		Type:     collection.TypeBase,
+		Name: "wal_secrets",
+		Type: collection.TypeBase,
 		Schema: []collection.SchemaField{
 			{Name: "title", Type: collection.FieldText},
 		},

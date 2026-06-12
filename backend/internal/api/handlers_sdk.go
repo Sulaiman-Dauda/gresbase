@@ -9,7 +9,7 @@ import (
 // TypesTS generates a typed TypeScript SDK from the live collection schema and
 // serves it as a downloadable module (gresbase.ts).
 func (h *Handlers) TypesTS(w http.ResponseWriter, r *http.Request) {
-	colls, err := h.app.Collections().ListCollections(r.Context(), "default")
+	colls, err := h.app.Collections().ListCollections(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to list collections")
 		return

@@ -88,7 +88,6 @@ const (
 	tusMetaAuthRecordID     = "__authRecordId"
 	tusMetaAuthCollectionID = "__authCollectionId"
 	tusMetaAuthEmail        = "__authEmail"
-	tusMetaAuthTenant       = "__authTenant"
 	tusMetaAuthVerified     = "__authVerified"
 	tusMetaAuthAnonymous    = "__authAnonymous"
 	tusMetaExpiresAt        = "__expiresAt"
@@ -237,7 +236,6 @@ func (t *tusController) preCreate(hook handler.HookEvent) (handler.HTTPResponse,
 		tusMetaAuthRecordID:     info.RecordID,
 		tusMetaAuthCollectionID: info.CollectionID,
 		tusMetaAuthEmail:        info.Email,
-		tusMetaAuthTenant:       info.TenantID,
 		tusMetaAuthVerified:     boolMeta(info.Verified),
 		tusMetaAuthAnonymous:    boolMeta(info.Anonymous),
 		tusMetaExpiresAt:        time.Now().Add(tusUploadTTL).UTC().Format(time.RFC3339),
@@ -444,9 +442,6 @@ func tusRequestInfoFromContext(ctx context.Context) *RequestInfo {
 	if role, ok := ctx.Value(contextKeyAdminRole).(string); ok {
 		info.Role = role
 	}
-	if tenantID, ok := ctx.Value(contextKeyTenantID).(string); ok {
-		info.TenantID = tenantID
-	}
 	if email, ok := ctx.Value("email").(string); ok {
 		info.Email = email
 	}
@@ -477,7 +472,6 @@ func tusRuleContextFromMeta(meta handler.MetaData) *RuleContext {
 		CollectionID: meta[tusMetaAuthCollectionID],
 		Role:         meta[tusMetaAuthRole],
 		Email:        meta[tusMetaAuthEmail],
-		TenantID:     meta[tusMetaAuthTenant],
 		Verified:     meta[tusMetaAuthVerified] == "true",
 		Anonymous:    meta[tusMetaAuthAnonymous] == "true",
 		Method:       http.MethodPatch,

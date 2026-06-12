@@ -39,11 +39,10 @@ const (
 // Claims represents JWT claims for Gresbase.
 type Claims struct {
 	jwt.RegisteredClaims
-	AdminID  string    `json:"admin_id,omitempty"`
-	Email    string    `json:"email,omitempty"`
-	Role     string    `json:"role,omitempty"`
-	TenantID string    `json:"tenant_id,omitempty"`
-	Type     TokenType `json:"type"`
+	AdminID string    `json:"admin_id,omitempty"`
+	Email   string    `json:"email,omitempty"`
+	Role    string    `json:"role,omitempty"`
+	Type    TokenType `json:"type"`
 }
 
 // Service handles authentication operations.
@@ -93,13 +92,13 @@ func fastHash(token string) string {
 }
 
 // GenerateTokens creates an access and refresh token pair.
-func (s *Service) GenerateTokens(adminID, email, role, tenantID string) (string, string, error) {
-	accessToken, err := s.generateToken(adminID, email, role, tenantID, AccessToken, s.cfg.AccessTokenExpiry)
+func (s *Service) GenerateTokens(adminID, email, role string) (string, string, error) {
+	accessToken, err := s.generateToken(adminID, email, role, AccessToken, s.cfg.AccessTokenExpiry)
 	if err != nil {
 		return "", "", err
 	}
 
-	refreshToken, err := s.generateToken(adminID, email, role, tenantID, RefreshToken, s.cfg.RefreshTokenExpiry)
+	refreshToken, err := s.generateToken(adminID, email, role, RefreshToken, s.cfg.RefreshTokenExpiry)
 	if err != nil {
 		return "", "", err
 	}
@@ -108,8 +107,8 @@ func (s *Service) GenerateTokens(adminID, email, role, tenantID string) (string,
 }
 
 // GenerateAdminToken creates an admin-level token.
-func (s *Service) GenerateAdminToken(adminID, email, role, tenantID string) (string, error) {
-	return s.generateToken(adminID, email, role, tenantID, AdminToken, s.cfg.AdminTokenExpiry)
+func (s *Service) GenerateAdminToken(adminID, email, role string) (string, error) {
+	return s.generateToken(adminID, email, role, AdminToken, s.cfg.AdminTokenExpiry)
 }
 
 // ValidateToken validates a JWT and returns the claims.
@@ -129,7 +128,7 @@ func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 }
 
 // generateToken creates a signed JWT.
-func (s *Service) generateToken(adminID, email, role, tenantID string, tokenType TokenType, expiry time.Duration) (string, error) {
+func (s *Service) generateToken(adminID, email, role string, tokenType TokenType, expiry time.Duration) (string, error) {
 	now := time.Now()
 
 	claims := &Claims{
@@ -140,11 +139,10 @@ func (s *Service) generateToken(adminID, email, role, tenantID string, tokenType
 			ExpiresAt: jwt.NewNumericDate(now.Add(expiry)),
 			Issuer:    "gresbase",
 		},
-		AdminID:  adminID,
-		Email:    email,
-		Role:     role,
-		TenantID: tenantID,
-		Type:     tokenType,
+		AdminID: adminID,
+		Email:   email,
+		Role:    role,
+		Type:    tokenType,
 	}
 
 	tokenString, err := signClaims(s.cfg, claims)
@@ -171,7 +169,7 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, st
 			return fmt.Errorf("invalid credentials")
 		}
 
-		accessToken, refreshToken, err = s.GenerateTokens(admin.ID, admin.Email, admin.Role, admin.TenantID)
+		accessToken, refreshToken, err = s.GenerateTokens(admin.ID, admin.Email, admin.Role)
 		if err != nil {
 			return err
 		}
@@ -182,9 +180,9 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, st
 
 		sessionID := uuid.New().String()
 		if _, err = s.exec(txCtx, `
-			INSERT INTO _sessions (id, admin_id, tenant_id, token, refresh_token, expires_at)
-			VALUES ($1, $2, $3, $4, $5, $6)`,
-			sessionID, admin.ID, admin.TenantID, accessToken, refreshToken,
+			INSERT INTO _sessions (id, admin_id, token, refresh_token, expires_at)
+			VALUES ($1, $2, $3, $4, $5)`,
+			sessionID, admin.ID, accessToken, refreshToken,
 			time.Now().Add(s.cfg.RefreshTokenExpiry)); err != nil {
 			return fmt.Errorf("failed to create session: %w", err)
 		}
@@ -222,16 +220,16 @@ func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (str
 		}
 
 		var err error
-		accessToken, refreshToken, err = s.GenerateTokens(claims.AdminID, claims.Email, claims.Role, claims.TenantID)
+		accessToken, refreshToken, err = s.GenerateTokens(claims.AdminID, claims.Email, claims.Role)
 		if err != nil {
 			return err
 		}
 
 		newSessionID := uuid.New().String()
 		if _, err = s.exec(txCtx, `
-			INSERT INTO _sessions (id, admin_id, tenant_id, token, refresh_token, expires_at)
-			VALUES ($1, $2, $3, $4, $5, $6)`,
-			newSessionID, claims.AdminID, claims.TenantID, accessToken, refreshToken,
+			INSERT INTO _sessions (id, admin_id, token, refresh_token, expires_at)
+			VALUES ($1, $2, $3, $4, $5)`,
+			newSessionID, claims.AdminID, accessToken, refreshToken,
 			time.Now().Add(s.cfg.RefreshTokenExpiry)); err != nil {
 			return fmt.Errorf("failed to create new session: %w", err)
 		}
@@ -252,7 +250,7 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 }
 
 // CreateAdmin creates a new admin user.
-func (s *Service) CreateAdmin(ctx context.Context, email, password, role, tenantID string) (*AdminUser, error) {
+func (s *Service) CreateAdmin(ctx context.Context, email, password, role string) (*AdminUser, error) {
 	hash, err := s.HashPassword(password)
 	if err != nil {
 		return nil, err
@@ -263,13 +261,12 @@ func (s *Service) CreateAdmin(ctx context.Context, email, password, role, tenant
 		Email:        email,
 		PasswordHash: hash,
 		Role:         role,
-		TenantID:     tenantID,
 	}
 
 	_, err = s.exec(ctx, `
-		INSERT INTO _admins (id, tenant_id, email, password_hash, role)
-		VALUES ($1, $2, $3, $4, $5)`,
-		admin.ID, admin.TenantID, admin.Email, admin.PasswordHash, admin.Role)
+		INSERT INTO _admins (id, email, password_hash, role)
+		VALUES ($1, $2, $3, $4)`,
+		admin.ID, admin.Email, admin.PasswordHash, admin.Role)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create admin: %w", err)
 	}
@@ -281,12 +278,12 @@ func (s *Service) CreateAdmin(ctx context.Context, email, password, role, tenant
 func (s *Service) FindAdminByEmail(ctx context.Context, email string) (*AdminUser, error) {
 	admin := &AdminUser{}
 	err := s.queryRow(ctx, `
-		SELECT id, tenant_id, email, password_hash, role, avatar,
+		SELECT id, email, password_hash, role, avatar,
 		       COALESCE(verified, FALSE) as verified,
 		       COALESCE(last_login_at, TIMESTAMP 'epoch') as last_login_at,
 		       created_at, updated_at
 		FROM _admins WHERE email = $1`, email).Scan(
-		&admin.ID, &admin.TenantID, &admin.Email, &admin.PasswordHash,
+		&admin.ID, &admin.Email, &admin.PasswordHash,
 		&admin.Role, &admin.Avatar, &admin.Verified, &admin.LastLoginAt,
 		&admin.CreatedAt, &admin.UpdatedAt)
 	if err != nil {
@@ -299,12 +296,12 @@ func (s *Service) FindAdminByEmail(ctx context.Context, email string) (*AdminUse
 func (s *Service) FindAdminByID(ctx context.Context, id string) (*AdminUser, error) {
 	admin := &AdminUser{}
 	err := s.queryRow(ctx, `
-		SELECT id, tenant_id, email, password_hash, role, avatar,
+		SELECT id, email, password_hash, role, avatar,
 		       COALESCE(verified, FALSE) as verified,
 		       COALESCE(last_login_at, TIMESTAMP 'epoch') as last_login_at,
 		       created_at, updated_at
 		FROM _admins WHERE id = $1`, id).Scan(
-		&admin.ID, &admin.TenantID, &admin.Email, &admin.PasswordHash,
+		&admin.ID, &admin.Email, &admin.PasswordHash,
 		&admin.Role, &admin.Avatar, &admin.Verified, &admin.LastLoginAt,
 		&admin.CreatedAt, &admin.UpdatedAt)
 	if err != nil {
@@ -313,7 +310,7 @@ func (s *Service) FindAdminByID(ctx context.Context, id string) (*AdminUser, err
 	return admin, nil
 }
 
-// CountAdmins returns the total number of admin users across all tenants.
+// CountAdmins returns the total number of admin users.
 // Used to determine if first-time setup is required.
 func (s *Service) CountAdmins(ctx context.Context) (int, error) {
 	var count int
@@ -324,15 +321,15 @@ func (s *Service) CountAdmins(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// ListAdmins lists all admins for a tenant.
-func (s *Service) ListAdmins(ctx context.Context, tenantID string) ([]*AdminUser, error) {
+// ListAdmins lists all admins.
+func (s *Service) ListAdmins(ctx context.Context) ([]*AdminUser, error) {
 	rows, err := s.query(ctx, `
-		SELECT id, tenant_id, email, password_hash, role, avatar,
+		SELECT id, email, password_hash, role, avatar,
 		       COALESCE(verified, FALSE) as verified,
 		       COALESCE(last_login_at, TIMESTAMP 'epoch') as last_login_at,
 		       created_at, updated_at
-		FROM _admins WHERE tenant_id = $1
-		ORDER BY created_at DESC`, tenantID)
+		FROM _admins
+		ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +339,7 @@ func (s *Service) ListAdmins(ctx context.Context, tenantID string) ([]*AdminUser
 	for rows.Next() {
 		admin := &AdminUser{}
 		if err := rows.Scan(
-			&admin.ID, &admin.TenantID, &admin.Email, &admin.PasswordHash,
+			&admin.ID, &admin.Email, &admin.PasswordHash,
 			&admin.Role, &admin.Avatar, &admin.Verified, &admin.LastLoginAt,
 			&admin.CreatedAt, &admin.UpdatedAt); err != nil {
 			return nil, err
@@ -352,9 +349,9 @@ func (s *Service) ListAdmins(ctx context.Context, tenantID string) ([]*AdminUser
 	return admins, nil
 }
 
-// ListAdminEmails returns the email of every superuser in the _admins table,
-// across all tenants. Used for instance-level operational alerts (e.g.
-// scheduled backup failures) that every superuser should hear about.
+// ListAdminEmails returns the email of every superuser in the _admins table.
+// Used for instance-level operational alerts (e.g. scheduled backup failures)
+// that every superuser should hear about.
 func (s *Service) ListAdminEmails(ctx context.Context) ([]string, error) {
 	rows, err := s.query(ctx, `SELECT email FROM _admins ORDER BY email`)
 	if err != nil {
@@ -386,7 +383,6 @@ func (s *Service) UpdateAdmin(ctx context.Context, id string, updates map[string
 		"role":          {},
 		"avatar":        {},
 		"password_hash": {},
-		"tenant_id":     {},
 		"verified":      {},
 	}
 
@@ -421,16 +417,10 @@ func (s *Service) RecordAudit(ctx context.Context, adminID, action, resource, re
 	if r != nil {
 		userAgent = r.Header.Get("User-Agent")
 	}
-	tenantID := "default"
-	if ctx != nil {
-		if ctxTenantID, ok := ctx.Value("tenant_id").(string); ok && ctxTenantID != "" {
-			tenantID = ctxTenantID
-		}
-	}
 	if _, err := s.exec(ctx,
-		`INSERT INTO _audit_logs (tenant_id, admin_id, action, resource, resource_id, data, ip, user_agent)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		tenantID, adminID, action, resource, resourceID, dataJSON, ip, userAgent); err != nil {
+		`INSERT INTO _audit_logs (admin_id, action, resource, resource_id, data, ip, user_agent)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		adminID, action, resource, resourceID, dataJSON, ip, userAgent); err != nil {
 		log.Warn().Err(err).Str("action", action).Str("resource", resource).Msg("Failed to write audit log")
 	}
 }
@@ -736,13 +726,12 @@ func (s *Service) FindOrCreateByOAuth(ctx context.Context, oauthUser *OAuthUserI
 	}
 
 	// Create new admin from OAuth
-	return s.CreateAdmin(ctx, oauthUser.Email, "", "admin", "default")
+	return s.CreateAdmin(ctx, oauthUser.Email, "", "admin")
 }
 
 // GenerateAPIKey creates a new API key.
 func (s *Service) GenerateAPIKey(ctx context.Context, adminID, name string, permissions []string) (string, *APIKey, error) {
-	admin, err := s.FindAdminByID(ctx, adminID)
-	if err != nil {
+	if _, err := s.FindAdminByID(ctx, adminID); err != nil {
 		return "", nil, fmt.Errorf("api key owner not found: %w", err)
 	}
 
@@ -770,7 +759,6 @@ func (s *Service) GenerateAPIKey(ctx context.Context, adminID, name string, perm
 	prefix := keyStr[:10]
 	apiKey := &APIKey{
 		ID:          uuid.New().String(),
-		TenantID:    admin.TenantID,
 		AdminID:     adminID,
 		Name:        name,
 		KeyHash:     hashed,
@@ -780,9 +768,9 @@ func (s *Service) GenerateAPIKey(ctx context.Context, adminID, name string, perm
 	}
 
 	_, err = s.exec(ctx, `
-		INSERT INTO _api_keys (id, tenant_id, admin_id, name, key_hash, prefix, permissions, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)`,
-		apiKey.ID, apiKey.TenantID, apiKey.AdminID, apiKey.Name, apiKey.KeyHash, apiKey.Prefix, permissionsJSON, now)
+		INSERT INTO _api_keys (id, admin_id, name, key_hash, prefix, permissions, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
+		apiKey.ID, apiKey.AdminID, apiKey.Name, apiKey.KeyHash, apiKey.Prefix, permissionsJSON, now)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create API key: %w", err)
 	}
@@ -867,7 +855,7 @@ func (s *Service) ValidateAPIKey(ctx context.Context, token string) (*APIKey, *A
 	}
 
 	rows, err := s.query(ctx, `
-		SELECT id, tenant_id, admin_id, name, key_hash, prefix, permissions, last_used_at, expires_at, created_at
+		SELECT id, admin_id, name, key_hash, prefix, permissions, last_used_at, expires_at, created_at
 		FROM _api_keys
 		WHERE prefix = $1`, prefix)
 	if err != nil {
@@ -878,14 +866,12 @@ func (s *Service) ValidateAPIKey(ctx context.Context, token string) (*APIKey, *A
 	now := time.Now().UTC()
 	for rows.Next() {
 		apiKey := &APIKey{}
-		var tenantID stdsql.NullString
 		var permissionsJSON []byte
 		var lastUsedAt stdsql.NullTime
 		var expiresAt stdsql.NullTime
-		if err := rows.Scan(&apiKey.ID, &tenantID, &apiKey.AdminID, &apiKey.Name, &apiKey.KeyHash, &apiKey.Prefix, &permissionsJSON, &lastUsedAt, &expiresAt, &apiKey.CreatedAt); err != nil {
+		if err := rows.Scan(&apiKey.ID, &apiKey.AdminID, &apiKey.Name, &apiKey.KeyHash, &apiKey.Prefix, &permissionsJSON, &lastUsedAt, &expiresAt, &apiKey.CreatedAt); err != nil {
 			continue
 		}
-		apiKey.TenantID = tenantID.String
 		apiKey.Permissions = decodeAPIKeyPermissions(permissionsJSON)
 		if expiresAt.Valid {
 			expiresAtValue := expiresAt.Time.UTC()
@@ -905,9 +891,6 @@ func (s *Service) ValidateAPIKey(ctx context.Context, token string) (*APIKey, *A
 		admin, err := s.FindAdminByID(ctx, apiKey.AdminID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("api key owner not found: %w", err)
-		}
-		if apiKey.TenantID == "" {
-			apiKey.TenantID = admin.TenantID
 		}
 		_, _ = s.exec(ctx, `UPDATE _api_keys SET last_used_at = $2, updated_at = $2 WHERE id = $1`, apiKey.ID, now)
 		apiKey.LastUsedAt = &now
@@ -953,7 +936,6 @@ func GenerateOTP(length int) (string, error) {
 // AdminUser represents an admin/superuser.
 type AdminUser struct {
 	ID           string    `json:"id"`
-	TenantID     string    `json:"tenant_id"`
 	Email        string    `json:"email"`
 	PasswordHash string    `json:"-"`
 	Avatar       string    `json:"avatar"`
@@ -967,7 +949,6 @@ type AdminUser struct {
 // APIKey represents an API key.
 type APIKey struct {
 	ID          string     `json:"id"`
-	TenantID    string     `json:"tenant_id,omitempty"`
 	AdminID     string     `json:"admin_id"`
 	Name        string     `json:"name"`
 	KeyHash     string     `json:"-"`

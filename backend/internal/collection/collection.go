@@ -65,7 +65,6 @@ type SchemaField struct {
 //   - "..." → filter expression evaluated against the request and record
 type Collection struct {
 	ID         string         `json:"id"`
-	TenantID   string         `json:"tenant_id"`
 	Name       string         `json:"name"`
 	Type       CollectionType `json:"type"`
 	Schema     []SchemaField  `json:"schema"`
@@ -155,10 +154,10 @@ func (s *Service) insertCollectionMetaWith(ctx context.Context, runner dbRunner,
 	optionsJSON, _ := json.Marshal(coll.Options)
 
 	_, err := runner.Exec(ctx, `
-		INSERT INTO _collections (id, tenant_id, name, type, schema, list_rule, view_rule,
+		INSERT INTO _collections (id, name, type, schema, list_rule, view_rule,
 			create_rule, update_rule, delete_rule, view_query, indexes, options, system)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-		coll.ID, coll.TenantID, coll.Name, coll.Type, schemaJSON,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		coll.ID, coll.Name, coll.Type, schemaJSON,
 		coll.ListRule, coll.ViewRule, coll.CreateRule, coll.UpdateRule, coll.DeleteRule,
 		coll.ViewQuery, indexesJSON, optionsJSON, coll.System,
 	)
@@ -270,7 +269,7 @@ func (s *Service) DeleteCollection(ctx context.Context, id string) error {
 // GetCollection retrieves a collection by ID.
 func (s *Service) GetCollection(ctx context.Context, id string) (*Collection, error) {
 	return s.scanCollection(ctx,
-		`SELECT id, tenant_id, name, type, schema, list_rule, view_rule,
+		`SELECT id, name, type, schema, list_rule, view_rule,
 			create_rule, update_rule, delete_rule, COALESCE(view_query,''),
 			indexes, options, system, created_at, updated_at
 		FROM _collections WHERE id = $1`, id)
@@ -279,20 +278,20 @@ func (s *Service) GetCollection(ctx context.Context, id string) (*Collection, er
 // GetCollectionByName retrieves a collection by name.
 func (s *Service) GetCollectionByName(ctx context.Context, name string) (*Collection, error) {
 	return s.scanCollection(ctx,
-		`SELECT id, tenant_id, name, type, schema, list_rule, view_rule,
+		`SELECT id, name, type, schema, list_rule, view_rule,
 			create_rule, update_rule, delete_rule, COALESCE(view_query,''),
 			indexes, options, system, created_at, updated_at
 		FROM _collections WHERE name = $1`, name)
 }
 
-// ListCollections lists all collections for a tenant.
-func (s *Service) ListCollections(ctx context.Context, tenantID string) ([]*Collection, error) {
+// ListCollections lists all collections.
+func (s *Service) ListCollections(ctx context.Context) ([]*Collection, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, tenant_id, name, type, schema, list_rule, view_rule,
+		SELECT id, name, type, schema, list_rule, view_rule,
 			create_rule, update_rule, delete_rule, COALESCE(view_query,''),
 			indexes, options, system, created_at, updated_at
-		FROM _collections WHERE tenant_id = $1
-		ORDER BY system DESC, created_at ASC`, tenantID)
+		FROM _collections
+		ORDER BY system DESC, created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +313,7 @@ func (s *Service) scanCollection(ctx context.Context, sql string, args ...any) (
 	coll := &Collection{}
 	var schemaJSON, indexesJSON, optionsJSON []byte
 	err := row.Scan(
-		&coll.ID, &coll.TenantID, &coll.Name, &coll.Type,
+		&coll.ID, &coll.Name, &coll.Type,
 		&schemaJSON, &coll.ListRule, &coll.ViewRule, &coll.CreateRule,
 		&coll.UpdateRule, &coll.DeleteRule, &coll.ViewQuery,
 		&indexesJSON, &coll.Options, &coll.System,
@@ -334,7 +333,7 @@ func (s *Service) scanCollectionRow(rows pgx.Rows) *Collection {
 	coll := &Collection{}
 	var schemaJSON, indexesJSON, optionsJSON []byte
 	if err := rows.Scan(
-		&coll.ID, &coll.TenantID, &coll.Name, &coll.Type,
+		&coll.ID, &coll.Name, &coll.Type,
 		&schemaJSON, &coll.ListRule, &coll.ViewRule, &coll.CreateRule,
 		&coll.UpdateRule, &coll.DeleteRule, &coll.ViewQuery,
 		&indexesJSON, &coll.Options, &coll.System,

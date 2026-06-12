@@ -77,11 +77,11 @@ func newIntegrationEnv(t *testing.T) *integrationEnv {
 
 func (e *integrationEnv) createAdminToken(t *testing.T) string {
 	t.Helper()
-	admin, err := e.app.Auth().CreateAdmin(context.Background(), "admin@example.com", "password123", "super_admin", "default")
+	admin, err := e.app.Auth().CreateAdmin(context.Background(), "admin@example.com", "password123", "super_admin")
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
-	token, _, err := e.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role, admin.TenantID)
+	token, _, err := e.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role)
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
@@ -92,9 +92,8 @@ func (e *integrationEnv) createCollection(t *testing.T, name string) *collection
 	t.Helper()
 	public := ""
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     name,
-		Type:     collection.TypeBase,
+		Name: name,
+		Type: collection.TypeBase,
 		Schema: []collection.SchemaField{
 			{Name: "title", Type: collection.FieldText, Required: true},
 		},
@@ -113,9 +112,8 @@ func (e *integrationEnv) createCollection(t *testing.T, name string) *collection
 func (e *integrationEnv) createAuthCollection(t *testing.T, name string) *collection.Collection {
 	t.Helper()
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     name,
-		Type:     collection.TypeAuth,
+		Name: name,
+		Type: collection.TypeAuth,
 		Schema: []collection.SchemaField{
 			{Name: "email", Type: collection.FieldEmail, Required: true, Unique: true},
 			{Name: "password", Type: collection.FieldPassword, Required: true},
@@ -328,7 +326,7 @@ func drainRealtimeMessages(client *mockRealtimeClient) {
 
 func TestIntegration_AdminLoginAndRefresh(t *testing.T) {
 	env := newIntegrationEnv(t)
-	_, err := env.app.Auth().CreateAdmin(context.Background(), "admin@example.com", "password123", "super_admin", "default")
+	_, err := env.app.Auth().CreateAdmin(context.Background(), "admin@example.com", "password123", "super_admin")
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
@@ -527,7 +525,7 @@ func TestIntegration_RecordAuthPasswordAndRefresh(t *testing.T) {
 
 func TestIntegration_AdminPasswordResetVerificationAndEmailChange(t *testing.T) {
 	env := newIntegrationEnv(t)
-	admin, err := env.app.Auth().CreateAdmin(context.Background(), "admin@example.com", "password123", "super_admin", "default")
+	admin, err := env.app.Auth().CreateAdmin(context.Background(), "admin@example.com", "password123", "super_admin")
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
 	}

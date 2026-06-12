@@ -14,11 +14,11 @@ import (
 
 func createAdminWithRole(t *testing.T, env *integrationEnv, email, role string) (string, string) {
 	t.Helper()
-	admin, err := env.app.Auth().CreateAdmin(context.Background(), email, "password123", role, "default")
+	admin, err := env.app.Auth().CreateAdmin(context.Background(), email, "password123", role)
 	if err != nil {
 		t.Fatalf("create admin (%s): %v", role, err)
 	}
-	token, _, err := env.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role, admin.TenantID)
+	token, _, err := env.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role)
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
@@ -143,9 +143,8 @@ func TestRecordUpdateRemovesOrphanedFiles(t *testing.T) {
 
 	publicView := ""
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     "docs",
-		Type:     collection.TypeBase,
+		Name: "docs",
+		Type: collection.TypeBase,
 		Schema: []collection.SchemaField{
 			{Name: "title", Type: collection.FieldText, Required: true},
 			{Name: "attachment", Type: collection.FieldFile},
@@ -216,10 +215,9 @@ func TestScopedAPIKeyPermissions(t *testing.T) {
 	adminID, _ := createAdminWithRole(t, env, "scoped-admin@example.com", "admin")
 
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     "scoped_posts",
-		Type:     collection.TypeBase,
-		Schema:   []collection.SchemaField{{Name: "title", Type: collection.FieldText, Required: true}},
+		Name:   "scoped_posts",
+		Type:   collection.TypeBase,
+		Schema: []collection.SchemaField{{Name: "title", Type: collection.FieldText, Required: true}},
 	}
 	if err := env.app.Collections().CreateCollection(context.Background(), coll); err != nil {
 		t.Fatalf("create scoped_posts collection: %v", err)
@@ -286,9 +284,8 @@ func TestCollectionDeleteRemovesStoredFiles(t *testing.T) {
 
 	publicView := ""
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     "delete_docs",
-		Type:     collection.TypeBase,
+		Name: "delete_docs",
+		Type: collection.TypeBase,
 		Schema: []collection.SchemaField{
 			{Name: "title", Type: collection.FieldText, Required: true},
 			{Name: "attachment", Type: collection.FieldFile},
@@ -367,9 +364,8 @@ func TestPocketBaseOAuth2Routes(t *testing.T) {
 	env := newIntegrationEnv(t)
 	registerStubOAuthProvider(t, env, "stuboauth")
 	members := &collection.Collection{
-		TenantID: "default",
-		Name:     "members",
-		Type:     collection.TypeAuth,
+		Name: "members",
+		Type: collection.TypeAuth,
 		Schema: []collection.SchemaField{
 			{Name: "email", Type: collection.FieldEmail, Required: true, Unique: true},
 			{Name: "password", Type: collection.FieldPassword, Required: false},

@@ -13,7 +13,6 @@ func TestNewRequestInfo(t *testing.T) {
 	req.Header.Set("X-Test", "ok")
 	ctx := context.WithValue(req.Context(), apimw.CtxAdminID, "admin1")
 	ctx = context.WithValue(ctx, apimw.CtxAdminRole, "super_admin")
-	ctx = context.WithValue(ctx, apimw.CtxTenantID, "tenant1")
 	req = req.WithContext(ctx)
 
 	info := NewRequestInfo(req)

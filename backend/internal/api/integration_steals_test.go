@@ -20,14 +20,14 @@ func TestSteals_AggregateExpandAnonymous(t *testing.T) {
 
 	// authors: locked (no rules). posts/comments: public reads.
 	authors := &collection.Collection{
-		TenantID: "default", Name: "authors", Type: collection.TypeBase,
+		Name: "authors", Type: collection.TypeBase,
 		Schema: []collection.SchemaField{{Name: "name", Type: collection.FieldText}},
 	}
 	if err := env.app.Collections().CreateCollection(context.Background(), authors); err != nil {
 		t.Fatalf("create authors: %v", err)
 	}
 	posts := &collection.Collection{
-		TenantID: "default", Name: "posts", Type: collection.TypeBase,
+		Name: "posts", Type: collection.TypeBase,
 		ListRule: public, ViewRule: public,
 		Schema: []collection.SchemaField{
 			{Name: "title", Type: collection.FieldText},
@@ -40,7 +40,7 @@ func TestSteals_AggregateExpandAnonymous(t *testing.T) {
 		t.Fatalf("create posts: %v", err)
 	}
 	comments := &collection.Collection{
-		TenantID: "default", Name: "comments", Type: collection.TypeBase,
+		Name: "comments", Type: collection.TypeBase,
 		ListRule: public, ViewRule: public,
 		Schema: []collection.SchemaField{
 			{Name: "body", Type: collection.FieldText},
@@ -155,7 +155,7 @@ func TestSteals_AggregateExpandAnonymous(t *testing.T) {
 		makeAuthCollection := func(name string, allow bool) {
 			t.Helper()
 			coll := &collection.Collection{
-				TenantID: "default", Name: name, Type: collection.TypeAuth,
+				Name: name, Type: collection.TypeAuth,
 				Schema: []collection.SchemaField{
 					{Name: "email", Type: collection.FieldEmail},
 					{Name: "password", Type: collection.FieldPassword},

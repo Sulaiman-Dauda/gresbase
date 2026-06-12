@@ -16,9 +16,8 @@ import (
 func (e *integrationEnv) createLockedCollection(t *testing.T, name string) *collection.Collection {
 	t.Helper()
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     name,
-		Type:     collection.TypeBase,
+		Name: name,
+		Type: collection.TypeBase,
 		Schema: []collection.SchemaField{
 			{Name: "title", Type: collection.FieldText, Required: true},
 		},
@@ -194,9 +193,8 @@ func TestSecurity_FileDownloadHonorsViewRule(t *testing.T) {
 	adminToken := env.createAdminToken(t)
 
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     "vault_docs",
-		Type:     collection.TypeBase,
+		Name: "vault_docs",
+		Type: collection.TypeBase,
 		Schema: []collection.SchemaField{
 			{Name: "title", Type: collection.FieldText, Required: true},
 			{Name: "attachment", Type: collection.FieldFile},

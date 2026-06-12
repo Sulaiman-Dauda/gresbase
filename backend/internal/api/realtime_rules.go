@@ -124,7 +124,6 @@ func ruleContextFromRealtimeAuth(auth *realtime.AuthInfo) *RuleContext {
 	rc.CollectionID = auth.Collection
 	rc.Role = auth.Role
 	rc.Email = auth.Email
-	rc.TenantID = auth.TenantID
 	rc.Verified = auth.Verified
 	rc.Anonymous = auth.Anonymous
 	return rc

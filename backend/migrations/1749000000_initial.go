@@ -3,24 +3,14 @@ package migrations
 import "github.com/gresbase/gresbase/internal/database"
 
 // Migration001 creates the initial Gresbase system tables:
-// tenants, admins, collections, api_keys, audit_logs,
+// admins, collections, api_keys, audit_logs,
 // sessions, rate_limits, external_auths, OTP, magic links,
 // password resets, verifications, and email changes.
 var Migration001 = &database.Migration{
 	Name: "1749000000_initial_schema",
 	Up: `
-CREATE TABLE IF NOT EXISTS _tenants (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    slug        TEXT NOT NULL UNIQUE,
-    settings    JSONB DEFAULT '{}',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 CREATE TABLE IF NOT EXISTS _admins (
     id              TEXT PRIMARY KEY,
-    tenant_id       TEXT REFERENCES _tenants(id) ON DELETE CASCADE,
     email           TEXT NOT NULL UNIQUE,
     password_hash   TEXT NOT NULL,
     avatar          TEXT DEFAULT '',
@@ -29,12 +19,10 @@ CREATE TABLE IF NOT EXISTS _admins (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_admins_tenant ON _admins(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_admins_email ON _admins(email);
 
 CREATE TABLE IF NOT EXISTS _collections (
     id            TEXT PRIMARY KEY,
-    tenant_id     TEXT REFERENCES _tenants(id) ON DELETE CASCADE,
     name          TEXT NOT NULL,
     type          TEXT NOT NULL DEFAULT 'base',
     schema        JSONB NOT NULL DEFAULT '[]',
@@ -50,11 +38,10 @@ CREATE TABLE IF NOT EXISTS _collections (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_tenant_name ON _collections(tenant_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name ON _collections(name);
 
 CREATE TABLE IF NOT EXISTS _api_keys (
     id            TEXT PRIMARY KEY,
-    tenant_id     TEXT REFERENCES _tenants(id) ON DELETE CASCADE,
     admin_id      TEXT REFERENCES _admins(id) ON DELETE CASCADE,
     name          TEXT NOT NULL,
     key_hash      TEXT NOT NULL,
@@ -69,7 +56,6 @@ CREATE INDEX IF NOT EXISTS idx_apikeys_key_hash ON _api_keys(key_hash);
 
 CREATE TABLE IF NOT EXISTS _audit_logs (
     id          BIGSERIAL PRIMARY KEY,
-    tenant_id   TEXT REFERENCES _tenants(id) ON DELETE CASCADE,
     admin_id    TEXT,
     action      TEXT NOT NULL,
     resource    TEXT NOT NULL,
@@ -84,7 +70,6 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON _audit_logs(created_at);
 CREATE TABLE IF NOT EXISTS _sessions (
     id            TEXT PRIMARY KEY,
     admin_id      TEXT REFERENCES _admins(id) ON DELETE CASCADE,
-    tenant_id     TEXT REFERENCES _tenants(id) ON DELETE CASCADE,
     token         TEXT NOT NULL UNIQUE,
     refresh_token TEXT,
     user_agent    TEXT,
@@ -162,9 +147,6 @@ CREATE TABLE IF NOT EXISTS _email_changes (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_email_changes_lookup ON _email_changes(lookup_hash);
-
-INSERT INTO _tenants (id, name, slug) VALUES ('default', 'Default', 'default')
-ON CONFLICT DO NOTHING;
 `,
 	Down: `
 DROP TABLE IF EXISTS _rate_limits CASCADE;
@@ -179,6 +161,5 @@ DROP TABLE IF EXISTS _audit_logs CASCADE;
 DROP TABLE IF EXISTS _api_keys CASCADE;
 DROP TABLE IF EXISTS _collections CASCADE;
 DROP TABLE IF EXISTS _admins CASCADE;
-DROP TABLE IF EXISTS _tenants CASCADE;
 `,
 }

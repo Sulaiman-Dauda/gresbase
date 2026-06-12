@@ -160,7 +160,6 @@ type AuthInfo struct {
 	AdminID    string `json:"admin_id"`
 	Email      string `json:"email"`
 	Role       string `json:"role"`
-	TenantID   string `json:"tenant_id"`
 	Collection string `json:"collection,omitempty"`
 	RecordID   string `json:"record_id,omitempty"`
 	Verified   bool   `json:"verified,omitempty"`
@@ -519,18 +518,16 @@ func authInfoFromContext(ctx context.Context) *AuthInfo {
 		return nil
 	}
 	if adminID, _ := ctx.Value("admin_id").(string); adminID != "" {
-		tenantID, _ := ctx.Value("tenant_id").(string)
 		email, _ := ctx.Value("admin_email").(string)
 		role, _ := ctx.Value("admin_role").(string)
-		return &AuthInfo{AdminID: adminID, Email: email, Role: role, TenantID: tenantID, Verified: true}
+		return &AuthInfo{AdminID: adminID, Email: email, Role: role, Verified: true}
 	}
 	if recordID, _ := ctx.Value("record_id").(string); recordID != "" {
-		tenantID, _ := ctx.Value("tenant_id").(string)
 		collectionID, _ := ctx.Value("collection_id").(string)
 		email, _ := ctx.Value("email").(string)
 		verified, _ := ctx.Value("verified").(bool)
 		anonymous, _ := ctx.Value("anonymous").(bool)
-		return &AuthInfo{RecordID: recordID, Collection: collectionID, Email: email, TenantID: tenantID, Verified: verified, Anonymous: anonymous}
+		return &AuthInfo{RecordID: recordID, Collection: collectionID, Email: email, Verified: verified, Anonymous: anonymous}
 	}
 	return nil
 }

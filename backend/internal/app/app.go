@@ -533,7 +533,7 @@ func (app *App) CreateAdmin(email, password string) error {
 	if !app.ready {
 		return fmt.Errorf("not bootstrapped")
 	}
-	admin, err := app.authService.CreateAdmin(context.Background(), email, password, "admin", "default")
+	admin, err := app.authService.CreateAdmin(context.Background(), email, password, "admin")
 	if err != nil {
 		return fmt.Errorf("create admin: %w", err)
 	}

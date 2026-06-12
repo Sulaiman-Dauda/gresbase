@@ -22,7 +22,6 @@ type RuleContext struct {
 	CollectionID string
 	Role         string
 	Email        string
-	TenantID     string
 	Verified     bool
 	Anonymous    bool
 
@@ -51,7 +50,6 @@ func NewRuleContextFromInfo(info *RequestInfo) *RuleContext {
 		CollectionID: info.CollectionID,
 		Role:         info.Role,
 		Email:        info.Email,
-		TenantID:     info.TenantID,
 		Verified:     info.Verified,
 		Anonymous:    info.Anonymous,
 		Method:       info.Method,
@@ -148,8 +146,6 @@ func (ev *RuleEvaluator) resolveRequestValue(key string, rc *RuleContext) any {
 		return rc.Anonymous
 	case "@request.auth.collection":
 		return rc.CollectionID
-	case "@request.auth.tenant":
-		return rc.TenantID
 	case "@request.method":
 		return rc.Method
 	}
@@ -176,7 +172,6 @@ func (ev *RuleEvaluator) resolveMacros(rule string, rc *RuleContext) string {
 		"@request.auth.verified",
 		"@request.auth.anonymous",
 		"@request.auth.collection",
-		"@request.auth.tenant",
 		"@request.method",
 	} {
 		if !strings.Contains(resolved, macro) {

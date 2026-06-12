@@ -15,12 +15,11 @@ import (
 // ---------------------------------------------------------------------------
 
 func (h *Handlers) CollectionsList(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Context().Value(contextKeyTenantID).(string)
 	event := &events.CollectionRequestEvent{App: h.app, Request: r, Info: toEventRequestInfo(r), Action: "list"}
 	var colls []*collection.Collection
 	if err := h.app.OnCollectionRequest().Trigger(event, func(e events.Event) error {
 		var err error
-		colls, err = h.app.Collections().ListCollections(r.Context(), tenantID)
+		colls, err = h.app.Collections().ListCollections(r.Context())
 		return err
 	}); err != nil {
 		writeError(w, 500, "Failed to list collections")
@@ -30,12 +29,11 @@ func (h *Handlers) CollectionsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) CollectionsExport(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Context().Value(contextKeyTenantID).(string)
 	event := &events.CollectionRequestEvent{App: h.app, Request: r, Info: toEventRequestInfo(r), Action: "export"}
 	var collectionsData []map[string]any
 	if err := h.app.OnCollectionRequest().Trigger(event, func(e events.Event) error {
 		var err error
-		collectionsData, err = h.app.Collections().ExportCollections(r.Context(), tenantID)
+		collectionsData, err = h.app.Collections().ExportCollections(r.Context())
 		return err
 	}); err != nil {
 		writeError(w, 500, "Failed to export collections")
@@ -50,8 +48,6 @@ func (h *Handlers) CollectionsCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "Invalid collection data")
 		return
 	}
-	tenantID := r.Context().Value(contextKeyTenantID).(string)
-	form.TenantID = tenantID
 	if err := form.Validate(h.app.Collections()); err != nil {
 		writeValidationError(w, err)
 		return
@@ -64,7 +60,6 @@ func (h *Handlers) CollectionsCreate(w http.ResponseWriter, r *http.Request) {
 		if err := remarshalInto(event.Data, &eventForm.Collection); err != nil {
 			return err
 		}
-		eventForm.TenantID = tenantID
 		if err := eventForm.Validate(h.app.Collections()); err != nil {
 			return err
 		}
@@ -185,7 +180,6 @@ func (h *Handlers) CollectionsImport(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, err)
 		return
 	}
-	tenantID := r.Context().Value(contextKeyTenantID).(string)
 	event := &events.CollectionsImportRequestEvent{
 		App:             h.app,
 		Request:         r,
@@ -194,7 +188,7 @@ func (h *Handlers) CollectionsImport(w http.ResponseWriter, r *http.Request) {
 		DeleteMissing:   form.DeleteMissing,
 	}
 	if err := h.app.OnCollectionsImportRequest().Trigger(event, func(e events.Event) error {
-		return h.app.Collections().ImportCollections(r.Context(), tenantID, event.CollectionsData, event.DeleteMissing)
+		return h.app.Collections().ImportCollections(r.Context(), event.CollectionsData, event.DeleteMissing)
 	}); err != nil {
 		writeError(w, 500, "Failed to import collections: "+err.Error())
 		return

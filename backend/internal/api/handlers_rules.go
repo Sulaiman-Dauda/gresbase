@@ -90,7 +90,6 @@ type ruleSimulateAuth struct {
 	ID           string `json:"id"`
 	Role         string `json:"role"`
 	Email        string `json:"email"`
-	Tenant       string `json:"tenant"`
 	Collection   string `json:"collection"`
 	Verified     bool   `json:"verified"`
 }
@@ -153,7 +152,6 @@ func (h *Handlers) RuleSimulate(w http.ResponseWriter, r *http.Request) {
 		CollectionID: auth.Collection,
 		Role:         auth.Role,
 		Email:        auth.Email,
-		TenantID:     auth.Tenant,
 		Verified:     auth.Verified,
 		Method:       r.Method,
 		Query:        req.Query,

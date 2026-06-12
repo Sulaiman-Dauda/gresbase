@@ -26,7 +26,7 @@ func hs256TestConfig() *config.Config {
 func TestValidateTokenRejectsTamperedPayload(t *testing.T) {
 	svc := auth.NewService(nil, hs256TestConfig())
 
-	access, _, err := svc.GenerateTokens("admin-1", "user@test.com", "admin", "default")
+	access, _, err := svc.GenerateTokens("admin-1", "user@test.com", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestValidateTokenRejectsTamperedPayload(t *testing.T) {
 func TestValidateTokenRejectsTamperedSignature(t *testing.T) {
 	svc := auth.NewService(nil, hs256TestConfig())
 
-	access, _, err := svc.GenerateTokens("admin-1", "user@test.com", "admin", "default")
+	access, _, err := svc.GenerateTokens("admin-1", "user@test.com", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestValidateTokenRejectsForeignES256Key(t *testing.T) {
 	svcA := auth.NewService(nil, cfgA)
 	svcB := auth.NewService(nil, cfgB)
 
-	access, _, err := svcA.GenerateTokens("admin-1", "a@b.com", "admin", "default")
+	access, _, err := svcA.GenerateTokens("admin-1", "a@b.com", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestValidateTokenRejectsMismatchedPublicKey(t *testing.T) {
 	}
 	svc := auth.NewService(nil, cfg)
 
-	access, _, err := svc.GenerateTokens("admin-1", "a@b.com", "admin", "default")
+	access, _, err := svc.GenerateTokens("admin-1", "a@b.com", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestGenerateTokensFailsWithoutSecret(t *testing.T) {
 	}
 	svc := auth.NewService(nil, cfg)
 
-	if _, _, err := svc.GenerateTokens("admin-1", "a@b.com", "admin", "default"); err == nil {
+	if _, _, err := svc.GenerateTokens("admin-1", "a@b.com", "admin"); err == nil {
 		t.Fatal("token generation must fail when JWT secret is empty")
 	}
 }
@@ -245,7 +245,7 @@ func TestUnsupportedJWTAlgorithmRejected(t *testing.T) {
 	}
 	svc := auth.NewService(nil, cfg)
 
-	if _, _, err := svc.GenerateTokens("admin-1", "a@b.com", "admin", "default"); err == nil {
+	if _, _, err := svc.GenerateTokens("admin-1", "a@b.com", "admin"); err == nil {
 		t.Fatal("unsupported JWT algorithm must be rejected")
 	}
 	if _, err := svc.ValidateToken("x.y.z"); err == nil {
@@ -262,7 +262,7 @@ func TestES256RejectsInvalidPrivateKeyPEM(t *testing.T) {
 	}
 	svc := auth.NewService(nil, cfg)
 
-	if _, _, err := svc.GenerateTokens("admin-1", "a@b.com", "admin", "default"); err == nil {
+	if _, _, err := svc.GenerateTokens("admin-1", "a@b.com", "admin"); err == nil {
 		t.Fatal("invalid private key PEM must be rejected")
 	}
 }
@@ -290,7 +290,7 @@ func TestPublicJWKSNilConfig(t *testing.T) {
 func TestRefreshTokenClaimsContent(t *testing.T) {
 	svc := auth.NewService(nil, hs256TestConfig())
 
-	access, refresh, err := svc.GenerateTokens("admin-1", "a@b.com", "admin", "tenant-x")
+	access, refresh, err := svc.GenerateTokens("admin-1", "a@b.com", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,9 +306,6 @@ func TestRefreshTokenClaimsContent(t *testing.T) {
 
 	if refreshClaims.Type != auth.RefreshToken {
 		t.Errorf("refresh token type = %s, want %s", refreshClaims.Type, auth.RefreshToken)
-	}
-	if refreshClaims.TenantID != "tenant-x" {
-		t.Errorf("tenant_id = %s, want tenant-x", refreshClaims.TenantID)
 	}
 	if refreshClaims.Issuer != "gresbase" {
 		t.Errorf("issuer = %s, want gresbase", refreshClaims.Issuer)
@@ -328,7 +325,7 @@ func TestRefreshTokenRejectsNonRefreshTokens(t *testing.T) {
 	svc := auth.NewService(nil, hs256TestConfig())
 	ctx := context.Background()
 
-	access, _, err := svc.GenerateTokens("admin-1", "a@b.com", "admin", "default")
+	access, _, err := svc.GenerateTokens("admin-1", "a@b.com", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

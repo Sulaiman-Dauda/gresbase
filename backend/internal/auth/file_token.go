@@ -25,7 +25,6 @@ type FileTokenClaims struct {
 	AdminID      string    `json:"admin_id,omitempty"`
 	Role         string    `json:"role,omitempty"`
 	Email        string    `json:"email,omitempty"`
-	TenantID     string    `json:"tenant_id,omitempty"`
 	RecordID     string    `json:"record_id,omitempty"`
 	CollectionID string    `json:"collection_id,omitempty"`
 	Verified     bool      `json:"verified,omitempty"`

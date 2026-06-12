@@ -320,9 +320,8 @@ func TestIntegration_SchemaMigrations_Snapshot(t *testing.T) {
 	expr := "published = true"
 	for _, coll := range []*collection.Collection{
 		{
-			TenantID: "default",
-			Name:     "posts",
-			Type:     collection.TypeBase,
+			Name: "posts",
+			Type: collection.TypeBase,
 			Schema: []collection.SchemaField{
 				{Name: "title", Type: collection.FieldText, Required: true},
 				{Name: "published", Type: collection.FieldBool},
@@ -332,9 +331,8 @@ func TestIntegration_SchemaMigrations_Snapshot(t *testing.T) {
 			CreateRule: locked,
 		},
 		{
-			TenantID: "default",
-			Name:     "tags",
-			Type:     collection.TypeBase,
+			Name: "tags",
+			Type: collection.TypeBase,
 			Schema: []collection.SchemaField{
 				{Name: "label", Type: collection.FieldText, Required: true},
 			},
@@ -346,7 +344,7 @@ func TestIntegration_SchemaMigrations_Snapshot(t *testing.T) {
 	}
 
 	snapDir := filepath.Join(t.TempDir(), "snap_migrations")
-	file, err := env1.app.SchemaMigrations().Snapshot(context.Background(), "default", "init")
+	file, err := env1.app.SchemaMigrations().Snapshot(context.Background(), "init")
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}

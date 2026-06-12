@@ -27,9 +27,8 @@ import (
 func (e *integrationEnv) createPasskeyAuthCollection(t *testing.T, name string, allowPasskeys bool) *collection.Collection {
 	t.Helper()
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     name,
-		Type:     collection.TypeAuth,
+		Name: name,
+		Type: collection.TypeAuth,
 		Schema: []collection.SchemaField{
 			{Name: "email", Type: collection.FieldEmail, Required: true, Unique: true},
 			{Name: "password", Type: collection.FieldPassword, Required: true},

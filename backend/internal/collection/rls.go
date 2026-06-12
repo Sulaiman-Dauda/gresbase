@@ -90,7 +90,6 @@ var rlsMacros = map[string]string{
 	"@request.auth.role":       "current_setting('gresbase.auth_role', true)",
 	"@request.auth.verified":   "current_setting('gresbase.auth_verified', true)::boolean",
 	"@request.auth.collection": "current_setting('gresbase.auth_collection', true)",
-	"@request.auth.tenant":     "current_setting('gresbase.auth_tenant', true)",
 	"@now":                     "now()",
 }
 

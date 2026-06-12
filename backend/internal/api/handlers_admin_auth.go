@@ -92,14 +92,14 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	var admin *auth.AdminUser
 	if err := h.app.OnAdminAuthRequest().Trigger(event, func(e events.Event) error {
 		var err error
-		admin, err = h.app.Auth().CreateAdmin(r.Context(), form.Email, form.Password, role, "default")
+		admin, err = h.app.Auth().CreateAdmin(r.Context(), form.Email, form.Password, role)
 		return err
 	}); err != nil {
 		writeError(w, 409, "Email already in use")
 		return
 	}
 
-	token, refreshToken, _ := h.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role, admin.TenantID)
+	token, refreshToken, _ := h.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role)
 	_ = h.app.OnAuthLogin().Trigger(&events.AuthEvent{App: h.app, UserID: admin.ID, Provider: "register", Token: token, RefreshToken: refreshToken}, func(e events.Event) error { return e.Next() })
 	h.app.Auth().RecordAudit(r.Context(), admin.ID, "auth.register", "_admins", admin.ID, nil, r)
 
@@ -213,7 +213,7 @@ func (h *Handlers) OTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, refreshToken, _ := h.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role, admin.TenantID)
+	token, refreshToken, _ := h.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role)
 	_ = h.app.OnAuthLogin().Trigger(&events.AuthEvent{App: h.app, UserID: admin.ID, Provider: "otp", Token: token, RefreshToken: refreshToken}, func(e events.Event) error { return e.Next() })
 	h.app.Auth().RecordAudit(r.Context(), admin.ID, "auth.otp", "_admins", admin.ID, nil, r)
 
@@ -275,7 +275,7 @@ func (h *Handlers) MagicLinkVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, refreshToken, _ := h.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role, admin.TenantID)
+	token, refreshToken, _ := h.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role)
 	_ = h.app.OnAuthLogin().Trigger(&events.AuthEvent{App: h.app, UserID: admin.ID, Provider: "magiclink", Token: token, RefreshToken: refreshToken}, func(e events.Event) error { return e.Next() })
 	h.app.Auth().RecordAudit(r.Context(), admin.ID, "auth.magiclink", "_admins", admin.ID, nil, r)
 
@@ -529,12 +529,11 @@ func (h *Handlers) AdminUpdateMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) AdminList(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Context().Value(contextKeyTenantID).(string)
 	event := &events.AdminUserRequestEvent{App: h.app, Request: r, Info: toEventRequestInfo(r), Action: "list"}
 	var admins []*auth.AdminUser
 	if err := h.app.OnAdminUserRequest().Trigger(event, func(e events.Event) error {
 		var err error
-		admins, err = h.app.Auth().ListAdmins(r.Context(), tenantID)
+		admins, err = h.app.Auth().ListAdmins(r.Context())
 		return err
 	}); err != nil {
 		writeError(w, 500, "Failed to list admins")
@@ -560,7 +559,6 @@ func (h *Handlers) AdminCreate(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, err)
 		return
 	}
-	tenantID := r.Context().Value(contextKeyTenantID).(string)
 	event := &events.AdminUserRequestEvent{App: h.app, Request: r, Info: toEventRequestInfoWithBody(r, form), Action: "create", Data: bodyToMap(form)}
 	var admin *auth.AdminUser
 	if err := h.app.OnAdminUserRequest().Trigger(event, func(e events.Event) error {
@@ -575,7 +573,7 @@ func (h *Handlers) AdminCreate(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		var err error
-		admin, err = h.app.Auth().CreateAdmin(r.Context(), createForm.Email, createForm.Password, createForm.Role, tenantID)
+		admin, err = h.app.Auth().CreateAdmin(r.Context(), createForm.Email, createForm.Password, createForm.Role)
 		return err
 	}); err != nil {
 		if _, ok := err.(forms.Errors); ok {
@@ -726,7 +724,7 @@ func (h *Handlers) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, refreshToken, _ := h.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role, admin.TenantID)
+	token, refreshToken, _ := h.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role)
 	_ = h.app.OnAuthLogin().Trigger(&events.AuthEvent{App: h.app, UserID: admin.ID, Provider: "oauth:" + provider, Token: token, RefreshToken: refreshToken}, func(e events.Event) error { return e.Next() })
 	h.app.Auth().RecordAudit(r.Context(), admin.ID, "auth.oauth."+provider, "_admins", admin.ID, nil, r)
 

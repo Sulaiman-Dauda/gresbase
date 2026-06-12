@@ -15,7 +15,6 @@ const (
 	CtxAdminID           = "admin_id"
 	CtxAdminRole         = "admin_role"
 	CtxAdminEmail        = "admin_email"
-	CtxTenantID          = "tenant_id"
 	CtxRequestID         = "request_id"
 	CtxAdminAuthMethod   = "admin_auth_method"
 	CtxAPIKeyID          = "api_key_id"
@@ -130,7 +129,6 @@ func (mw *Middleware) OptionalAuth(next http.Handler) http.Handler {
 					ctx = context.WithValue(ctx, "email", recordClaims.Email)
 					ctx = context.WithValue(ctx, "verified", recordClaims.Verified)
 					ctx = context.WithValue(ctx, "anonymous", recordClaims.Anonymous)
-					ctx = context.WithValue(ctx, CtxTenantID, "default")
 					r = r.WithContext(ctx)
 				}
 			}
@@ -146,13 +144,13 @@ func (mw *Middleware) authenticateAdminRequest(r *http.Request) (context.Context
 	}
 
 	if claims, err := mw.app.Auth().ValidateToken(credential); err == nil && isAllowedAdminTokenType(claims.Type) {
-		ctx := withAdminContext(r.Context(), claims.AdminID, claims.Role, claims.Email, claims.TenantID)
+		ctx := withAdminContext(r.Context(), claims.AdminID, claims.Role, claims.Email)
 		ctx = context.WithValue(ctx, CtxAdminAuthMethod, "jwt")
 		return ctx, true
 	}
 
 	if apiKey, admin, err := mw.app.Auth().ValidateAPIKey(r.Context(), credential); err == nil && admin != nil {
-		ctx := withAdminContext(r.Context(), admin.ID, admin.Role, admin.Email, admin.TenantID)
+		ctx := withAdminContext(r.Context(), admin.ID, admin.Role, admin.Email)
 		ctx = context.WithValue(ctx, CtxAdminAuthMethod, "api_key")
 		ctx = context.WithValue(ctx, CtxAPIKeyID, apiKey.ID)
 		ctx = context.WithValue(ctx, CtxAPIKeyPermissions, auth.NormalizeAPIKeyPermissions(apiKey.Permissions))
@@ -162,11 +160,10 @@ func (mw *Middleware) authenticateAdminRequest(r *http.Request) (context.Context
 	return nil, false
 }
 
-func withAdminContext(ctx context.Context, adminID, role, email, tenantID string) context.Context {
+func withAdminContext(ctx context.Context, adminID, role, email string) context.Context {
 	ctx = context.WithValue(ctx, CtxAdminID, adminID)
 	ctx = context.WithValue(ctx, CtxAdminRole, role)
 	ctx = context.WithValue(ctx, CtxAdminEmail, email)
-	ctx = context.WithValue(ctx, CtxTenantID, tenantID)
 	return ctx
 }
 

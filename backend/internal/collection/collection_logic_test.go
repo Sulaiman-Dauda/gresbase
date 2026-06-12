@@ -799,10 +799,10 @@ func TestViewCollectionsRejectWrites(t *testing.T) {
 
 func TestImportCollectionsRejectsEmpty(t *testing.T) {
 	svc := NewService(nil)
-	if err := svc.ImportCollections(context.Background(), "default", nil, false); err == nil {
+	if err := svc.ImportCollections(context.Background(), nil, false); err == nil {
 		t.Error("empty import should error before touching the database")
 	}
-	if err := svc.ImportCollections(context.Background(), "default", []map[string]any{}, true); err == nil {
+	if err := svc.ImportCollections(context.Background(), []map[string]any{}, true); err == nil {
 		t.Error("empty import slice should error")
 	}
 }

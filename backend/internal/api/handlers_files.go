@@ -33,13 +33,11 @@ func (h *Handlers) FileDownload(w http.ResponseWriter, r *http.Request) {
 			if claims.IsAdmin {
 				ctx = context.WithValue(ctx, contextKeyAdminID, claims.AdminID)
 				ctx = context.WithValue(ctx, contextKeyAdminRole, claims.Role)
-				ctx = context.WithValue(ctx, contextKeyTenantID, claims.TenantID)
 			} else if claims.RecordID != "" {
 				ctx = context.WithValue(ctx, "record_id", claims.RecordID)
 				ctx = context.WithValue(ctx, "collection_id", claims.CollectionID)
 				ctx = context.WithValue(ctx, "email", claims.Email)
 				ctx = context.WithValue(ctx, "verified", claims.Verified)
-				ctx = context.WithValue(ctx, contextKeyTenantID, "default")
 			}
 			r = r.WithContext(ctx)
 		}
@@ -125,7 +123,6 @@ func (h *Handlers) FileToken(w http.ResponseWriter, r *http.Request) {
 		AdminID:      info.AdminID,
 		Role:         info.Role,
 		Email:        info.Email,
-		TenantID:     info.TenantID,
 		RecordID:     info.RecordID,
 		CollectionID: info.CollectionID,
 		Verified:     info.Verified,

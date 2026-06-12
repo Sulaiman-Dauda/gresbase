@@ -235,7 +235,7 @@ func typesCommand(gb *gresbase.Gresbase) *cobra.Command {
 				url = "http://" + addr + "/api/v1"
 			}
 
-			colls, err := gb.App().Collections().ListCollections(cmd.Context(), "default")
+			colls, err := gb.App().Collections().ListCollections(cmd.Context())
 			if err != nil {
 				return err
 			}

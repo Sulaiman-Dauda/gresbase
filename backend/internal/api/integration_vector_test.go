@@ -21,9 +21,8 @@ func TestIntegration_VectorSearch(t *testing.T) {
 
 	public := ""
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     "documents",
-		Type:     collection.TypeBase,
+		Name: "documents",
+		Type: collection.TypeBase,
 		Schema: []collection.SchemaField{
 			{Name: "title", Type: collection.FieldText, Required: true},
 			{Name: "embedding", Type: collection.FieldVector, Options: map[string]any{

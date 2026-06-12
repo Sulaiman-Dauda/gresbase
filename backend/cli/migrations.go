@@ -29,7 +29,7 @@ func migrationsCommand(gb *gresbase.Gresbase) *cobra.Command {
 			if len(args) > 0 {
 				name = args[0]
 			}
-			file, err := gb.App().SchemaMigrations().Snapshot(cmd.Context(), "default", name)
+			file, err := gb.App().SchemaMigrations().Snapshot(cmd.Context(), name)
 			if err != nil {
 				return err
 			}

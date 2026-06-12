@@ -19,7 +19,6 @@ func cloneRequestContext(ctx context.Context, includeTx bool) context.Context {
 		apimw.CtxAdminID,
 		apimw.CtxAdminRole,
 		apimw.CtxAdminEmail,
-		apimw.CtxTenantID,
 		apimw.CtxRequestID,
 		apimw.CtxAdminAuthMethod,
 		apimw.CtxAPIKeyID,

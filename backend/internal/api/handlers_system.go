@@ -169,14 +169,14 @@ func (h *Handlers) SetupCreate(w http.ResponseWriter, r *http.Request) {
 	var admin *auth.AdminUser
 	if err := h.app.OnAdminAuthRequest().Trigger(event, func(e events.Event) error {
 		var err error
-		admin, err = h.app.Auth().CreateAdmin(r.Context(), form.Email, form.Password, "super_admin", "default")
+		admin, err = h.app.Auth().CreateAdmin(r.Context(), form.Email, form.Password, "super_admin")
 		return err
 	}); err != nil {
 		writeError(w, 409, "Failed to create admin: "+err.Error())
 		return
 	}
 
-	token, refreshToken, _ := h.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role, admin.TenantID)
+	token, refreshToken, _ := h.app.Auth().GenerateTokens(admin.ID, admin.Email, admin.Role)
 	_ = h.app.OnAuthLogin().Trigger(&events.AuthEvent{App: h.app, UserID: admin.ID, Provider: "setup", Token: token, RefreshToken: refreshToken}, func(e events.Event) error { return e.Next() })
 	h.app.Auth().RecordAudit(r.Context(), admin.ID, "setup.first_admin", "_admins", admin.ID, nil, r)
 

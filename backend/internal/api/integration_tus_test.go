@@ -48,9 +48,8 @@ func createTUSFileCollection(t *testing.T, env *integrationEnv, name string, upd
 	t.Helper()
 	public := ""
 	coll := &collection.Collection{
-		TenantID: "default",
-		Name:     name,
-		Type:     collection.TypeBase,
+		Name: name,
+		Type: collection.TypeBase,
 		Schema: []collection.SchemaField{
 			{Name: "owner", Type: collection.FieldText},
 			{Name: "doc", Type: collection.FieldFile, Options: fileOpts},

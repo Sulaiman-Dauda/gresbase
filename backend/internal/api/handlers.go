@@ -14,7 +14,6 @@ import (
 var (
 	contextKeyAdminID   = middleware.CtxAdminID
 	contextKeyAdminRole = middleware.CtxAdminRole
-	contextKeyTenantID  = middleware.CtxTenantID
 )
 
 type Handlers struct {
@@ -83,7 +82,6 @@ func getBaseURL(r *http.Request) string {
 func sanitizeAdmin(a *auth.AdminUser) map[string]any {
 	return map[string]any{
 		"id":            a.ID,
-		"tenant_id":     a.TenantID,
 		"email":         a.Email,
 		"avatar":        a.Avatar,
 		"role":          a.Role,

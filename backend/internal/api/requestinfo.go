@@ -22,7 +22,6 @@ type RequestInfo struct {
 	CollectionID string            `json:"collectionId,omitempty"`
 	Role         string            `json:"role,omitempty"`
 	Email        string            `json:"email,omitempty"`
-	TenantID     string            `json:"tenantId,omitempty"`
 	Verified     bool              `json:"verified,omitempty"`
 	Anonymous    bool              `json:"anonymous,omitempty"`
 }
@@ -52,9 +51,6 @@ func NewRequestInfo(r *http.Request) *RequestInfo {
 	}
 	if role, ok := r.Context().Value(apimw.CtxAdminRole).(string); ok {
 		info.Role = role
-	}
-	if tenantID, ok := r.Context().Value(apimw.CtxTenantID).(string); ok {
-		info.TenantID = tenantID
 	}
 	if email, ok := r.Context().Value("email").(string); ok {
 		info.Email = email
@@ -134,7 +130,6 @@ func toEventRequestInfoWithBody(r *http.Request, body any) *events.HTTPRequestIn
 		AdminID:      info.AdminID,
 		RecordID:     info.RecordID,
 		CollectionID: info.CollectionID,
-		TenantID:     info.TenantID,
 		Role:         info.Role,
 		Email:        info.Email,
 		Verified:     info.Verified,

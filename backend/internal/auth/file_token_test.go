@@ -12,10 +12,9 @@ func TestGenerateAndValidateFileTokenAdmin(t *testing.T) {
 	svc := auth.NewService(nil, hs256TestConfig())
 
 	token, err := svc.GenerateFileToken(auth.FileTokenClaims{
-		AdminID:  "admin-1",
-		Role:     "admin",
-		Email:    "a@b.com",
-		TenantID: "default",
+		AdminID: "admin-1",
+		Role:    "admin",
+		Email:   "a@b.com",
 	})
 	if err != nil {
 		t.Fatalf("generate file token: %v", err)
@@ -78,7 +77,7 @@ func TestValidateFileTokenRejectsOtherTokenTypes(t *testing.T) {
 	// tokens (they have far longer lifetimes).
 	svc := auth.NewService(nil, hs256TestConfig())
 
-	access, refresh, err := svc.GenerateTokens("admin-1", "a@b.com", "admin", "default")
+	access, refresh, err := svc.GenerateTokens("admin-1", "a@b.com", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

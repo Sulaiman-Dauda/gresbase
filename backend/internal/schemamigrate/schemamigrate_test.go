@@ -21,10 +21,9 @@ func TestTriStateRulesSurviveFileRoundTrip(t *testing.T) {
 	public := ""
 	expr := "@request.auth.id != ''"
 	coll := &collection.Collection{
-		ID:       "c1",
-		TenantID: "default",
-		Name:     "articles",
-		Type:     collection.TypeBase,
+		ID:   "c1",
+		Name: "articles",
+		Type: collection.TypeBase,
 		Schema: []collection.SchemaField{
 			{Name: "title", Type: collection.FieldText, Required: true},
 		},

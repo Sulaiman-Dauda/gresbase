@@ -9,9 +9,9 @@ import (
 	"github.com/gresbase/gresbase/internal/database"
 )
 
-// ExportCollections returns a snapshot-friendly representation of all tenant collections.
-func (s *Service) ExportCollections(ctx context.Context, tenantID string) ([]map[string]any, error) {
-	collections, err := s.ListCollections(ctx, tenantID)
+// ExportCollections returns a snapshot-friendly representation of all collections.
+func (s *Service) ExportCollections(ctx context.Context) ([]map[string]any, error) {
+	collections, err := s.ListCollections(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -32,15 +32,15 @@ func (s *Service) ExportCollections(ctx context.Context, tenantID string) ([]map
 	return result, nil
 }
 
-// ImportCollections imports collection snapshots for a tenant.
+// ImportCollections imports collection snapshots.
 // Existing collections are matched by id first and then by name.
-func (s *Service) ImportCollections(ctx context.Context, tenantID string, toImport []map[string]any, deleteMissing bool) error {
+func (s *Service) ImportCollections(ctx context.Context, toImport []map[string]any, deleteMissing bool) error {
 	if len(toImport) == 0 {
 		return errors.New("no collections to import")
 	}
 
 	return s.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
-		existing, err := s.ListCollections(txCtx, tenantID)
+		existing, err := s.ListCollections(txCtx)
 		if err != nil {
 			return err
 		}
@@ -70,7 +70,6 @@ func (s *Service) ImportCollections(ctx context.Context, tenantID string, toImpo
 			if err := json.Unmarshal(raw, coll); err != nil {
 				return err
 			}
-			coll.TenantID = tenantID
 			if err := s.ValidateCollectionDefinition(coll); err != nil {
 				return err
 			}

@@ -43,7 +43,7 @@ func TestGenerateTokens(t *testing.T) {
 	}
 	svc := auth.NewService(nil, cfg)
 
-	access, refresh, err := svc.GenerateTokens("admin-1", "test@gresbase.com", "admin", "default")
+	access, refresh, err := svc.GenerateTokens("admin-1", "test@gresbase.com", "admin")
 	if err != nil {
 		t.Fatalf("Failed to generate tokens: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestGenerateTokensES256AndJWKS(t *testing.T) {
 	}
 	svc := auth.NewService(nil, cfg)
 
-	access, _, err := svc.GenerateTokens("admin-1", "test@gresbase.com", "admin", "default")
+	access, _, err := svc.GenerateTokens("admin-1", "test@gresbase.com", "admin")
 	if err != nil {
 		t.Fatalf("failed to generate ES256 tokens: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestValidateTokenInvalidSignature(t *testing.T) {
 	}
 	svc := auth.NewService(nil, cfg)
 
-	access, _, err := svc.GenerateTokens("admin-1", "t@t.com", "admin", "default")
+	access, _, err := svc.GenerateTokens("admin-1", "t@t.com", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestTokenExpiry(t *testing.T) {
 	}
 	svc := auth.NewService(nil, cfg)
 
-	access, _, err := svc.GenerateTokens("admin-1", "t@t.com", "admin", "default")
+	access, _, err := svc.GenerateTokens("admin-1", "t@t.com", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestAdminTokenGeneration(t *testing.T) {
 	}
 	svc := auth.NewService(nil, cfg)
 
-	token, err := svc.GenerateAdminToken("admin-1", "t@t.com", "admin", "default")
+	token, err := svc.GenerateAdminToken("admin-1", "t@t.com", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

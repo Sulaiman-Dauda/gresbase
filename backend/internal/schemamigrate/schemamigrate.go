@@ -55,10 +55,6 @@ const FormatVersion = 1
 // TrackingTable records applied migration filenames.
 const TrackingTable = "_collection_migrations"
 
-// DefaultTenant is the tenant collections are applied under when a snapshot
-// carries no tenant id.
-const DefaultTenant = "default"
-
 // MigrationFile is the on-disk migration format. Collections are full
 // *collection.Collection snapshots, which keeps the locked-by-default
 // tri-state access rules intact: a *string rule marshals to JSON null
@@ -183,11 +179,8 @@ func (r *Runner) List(ctx context.Context) ([]Status, error) {
 // Snapshot writes a single migration file containing the full current
 // snapshot of all non-system collections (no deletions), marked as already
 // applied. This is how an existing instance bootstraps its migration history.
-func (r *Runner) Snapshot(ctx context.Context, tenantID, name string) (string, error) {
-	if tenantID == "" {
-		tenantID = DefaultTenant
-	}
-	colls, err := r.svc.ListCollections(ctx, tenantID)
+func (r *Runner) Snapshot(ctx context.Context, name string) (string, error) {
+	colls, err := r.svc.ListCollections(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -324,9 +317,6 @@ func (r *Runner) applyMigration(ctx context.Context, mf *MigrationFile) error {
 		// Work on a copy so apply never mutates the parsed file in ways that
 		// would surprise repeated use.
 		coll := *snapshot
-		if coll.TenantID == "" {
-			coll.TenantID = DefaultTenant
-		}
 
 		existing, err := r.svc.GetCollectionByName(ctx, coll.Name)
 		switch {
@@ -335,7 +325,6 @@ func (r *Runner) applyMigration(ctx context.Context, mf *MigrationFile) error {
 				return fmt.Errorf("refusing to modify system collection %q", coll.Name)
 			}
 			coll.ID = existing.ID
-			coll.TenantID = existing.TenantID
 			coll.CreatedAt = existing.CreatedAt
 			if err := r.svc.UpdateCollection(ctx, &coll); err != nil {
 				return fmt.Errorf("update collection %q: %w", coll.Name, err)
