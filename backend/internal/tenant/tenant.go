@@ -64,7 +64,7 @@ func (s *Service) CreateTenant(ctx context.Context, name, slug string) (*Tenant,
 	}
 
 	settingsJSON, _ := json.Marshal(t.Settings)
-	_, err := s.db.Pool.Exec(ctx, `
+	err := s.db.Exec(ctx, `
 		INSERT INTO _tenants (id, name, slug, settings, active)
 		VALUES ($1, $2, $3, $4, $5)`,
 		t.ID, t.Name, t.Slug, settingsJSON, t.Active)
@@ -80,7 +80,7 @@ func (s *Service) GetTenant(ctx context.Context, id string) (*Tenant, error) {
 	t := &Tenant{}
 	var settingsJSON []byte
 
-	err := s.db.Pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT id, name, slug, settings, active, created_at, updated_at
 		FROM _tenants WHERE id = $1`, id).Scan(
 		&t.ID, &t.Name, &t.Slug, &settingsJSON, &t.Active, &t.CreatedAt, &t.UpdatedAt)
@@ -97,7 +97,7 @@ func (s *Service) GetTenantBySlug(ctx context.Context, slug string) (*Tenant, er
 	t := &Tenant{}
 	var settingsJSON []byte
 
-	err := s.db.Pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT id, name, slug, settings, active, created_at, updated_at
 		FROM _tenants WHERE slug = $1`, slug).Scan(
 		&t.ID, &t.Name, &t.Slug, &settingsJSON, &t.Active, &t.CreatedAt, &t.UpdatedAt)
@@ -111,7 +111,7 @@ func (s *Service) GetTenantBySlug(ctx context.Context, slug string) (*Tenant, er
 
 // ListTenants lists all tenants.
 func (s *Service) ListTenants(ctx context.Context) ([]*Tenant, error) {
-	rows, err := s.db.Pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id, name, slug, settings, active, created_at, updated_at
 		FROM _tenants ORDER BY created_at ASC`)
 	if err != nil {
@@ -136,14 +136,12 @@ func (s *Service) ListTenants(ctx context.Context) ([]*Tenant, error) {
 // UpdateTenant updates a tenant's information.
 func (s *Service) UpdateTenant(ctx context.Context, id string, updates map[string]any) error {
 	if name, ok := updates["name"]; ok {
-		_, err := s.db.Pool.Exec(ctx, "UPDATE _tenants SET name = $1, updated_at = NOW() WHERE id = $2", name, id)
-		if err != nil {
+		if err := s.db.Exec(ctx, "UPDATE _tenants SET name = $1, updated_at = NOW() WHERE id = $2", name, id); err != nil {
 			return err
 		}
 	}
 	if active, ok := updates["active"]; ok {
-		_, err := s.db.Pool.Exec(ctx, "UPDATE _tenants SET active = $1, updated_at = NOW() WHERE id = $2", active, id)
-		if err != nil {
+		if err := s.db.Exec(ctx, "UPDATE _tenants SET active = $1, updated_at = NOW() WHERE id = $2", active, id); err != nil {
 			return err
 		}
 	}
@@ -152,7 +150,7 @@ func (s *Service) UpdateTenant(ctx context.Context, id string, updates map[strin
 
 // DeleteTenant removes a tenant and all its data (CASCADE).
 func (s *Service) DeleteTenant(ctx context.Context, id string) error {
-	result, err := s.db.Pool.Exec(ctx, "DELETE FROM _tenants WHERE id = $1", id)
+	result, err := s.db.ExecResult(ctx, "DELETE FROM _tenants WHERE id = $1", id)
 	if err != nil {
 		return err
 	}
@@ -165,7 +163,7 @@ func (s *Service) DeleteTenant(ctx context.Context, id string) error {
 // Exists checks if a tenant slug exists.
 func (s *Service) Exists(ctx context.Context, slug string) bool {
 	var exists bool
-	s.db.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM _tenants WHERE slug = $1)", slug).Scan(&exists)
+	s.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM _tenants WHERE slug = $1)", slug).Scan(&exists)
 	return exists
 }
 

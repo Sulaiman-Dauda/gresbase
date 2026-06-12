@@ -211,6 +211,33 @@ func TestFilterMatches(t *testing.T) {
 	}
 }
 
+func TestFilterMatchesWithResolver(t *testing.T) {
+	expr, err := ParseFilter(`owner = @request.auth.id && @request.auth.role = "member"`)
+	if err != nil {
+		t.Fatalf("ParseFilter error: %v", err)
+	}
+
+	record := map[string]any{"owner": "rec_123"}
+	resolver := func(key string) (any, error) {
+		switch key {
+		case "@request.auth.id":
+			return "rec_123", nil
+		case "@request.auth.role":
+			return "member", nil
+		default:
+			return nil, nil
+		}
+	}
+
+	matched, err := FilterMatchesWithResolver(expr, record, resolver)
+	if err != nil {
+		t.Fatalf("FilterMatchesWithResolver error: %v", err)
+	}
+	if !matched {
+		t.Fatal("expected rule with right-side resolver values to match")
+	}
+}
+
 func TestValidateFields(t *testing.T) {
 	expr, _ := ParseFilter(`status = "active" && age > 18`)
 

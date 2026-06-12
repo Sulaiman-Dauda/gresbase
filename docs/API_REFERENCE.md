@@ -202,6 +202,17 @@ Delete a collection.
 
 ---
 
+## Typed SDK
+
+### `GET /types.ts`
+Generate a TypeScript module from the live schema (requires authentication): one interface per collection plus a typed client. See also the hand-maintained `gresbase-sdk` package on npm.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" $API/types.ts -o gresbase.ts
+```
+
+---
+
 ## Records
 
 ### `GET /records/{collection}`
@@ -214,7 +225,7 @@ List records in a collection.
 | perPage | int | 30 | Records per page (max 200) |
 | filter | string | — | Filter expression |
 | sort | string | `-created_at` | Sort field(s), prefix with `-` for desc |
-| expand | string | — | Comma-separated relation fields to expand |
+| expand | string | — | Comma-separated relation paths to expand (see [Relation Expansion](#relation-expansion)) |
 | fields | string | `*` | Comma-separated fields to return |
 | skipTotal | bool | false | Skip total count for performance |
 
@@ -267,6 +278,76 @@ Partially update a record.
 ### `DELETE /records/{collection}/{id}`
 Delete a record.
 
+### `GET /records/{collection}/aggregate`
+Run aggregate queries over a collection. Read access is governed by the collection's **list rule**, exactly like listing — the resolved rule is compiled into the `WHERE` clause, so aggregates never count rows the requester could not list.
+
+**Query Parameters**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| aggregate | string | — | **Required.** Comma-separated functions: `count`, `sum:field`, `avg:field`, `min:field`, `max:field` (max 10) |
+| groupBy | string | — | Comma-separated fields to group by (max 5) |
+| filter | string | — | Filter expression, combined with the list rule |
+| sort | string | — | Aggregate aliases or `groupBy` fields, prefix with `-` for desc |
+| limit | int | 100 | Maximum result rows (max 1000) |
+
+`sum` and `avg` require `number` fields; `min`/`max` accept any field. Result keys are named after the alias: `count` for `count`, `<fn>_<field>` otherwise (e.g. `sum_total`).
+
+**Example**
+```
+GET /api/v1/records/orders/aggregate?aggregate=count,sum:total&groupBy=status&sort=-sum_total
+```
+
+**Response** `200 OK`
+```json
+{
+  "items": [
+    { "status": "paid", "count": 41, "sum_total": 1290.5 },
+    { "status": "pending", "count": 7, "sum_total": 310 }
+  ]
+}
+```
+
+### Relation Expansion
+
+The `expand` parameter on record list/get endpoints resolves relations server-side and nests the related records under each record's `expand` key:
+
+| Form | Example | Description |
+|------|---------|-------------|
+| Forward | `?expand=author` | Expands a `relation` field on the listed records |
+| Back-relation | `?expand=comments_via_post` | `<collection>_via_<relationField>` — records in `comments` whose `post` relation points back at this record |
+| Nested | `?expand=comments_via_post.user` | Dot-separated path, expanded level by level, up to 6 levels deep |
+
+**Example**
+```
+GET /api/v1/records/posts?expand=author,comments_via_post.user
+```
+
+**Response** `200 OK`
+```json
+{
+  "items": [
+    {
+      "id": "rec_abc",
+      "title": "Hello World",
+      "author": "rec_user1",
+      "expand": {
+        "author": { "id": "rec_user1", "name": "John Doe" },
+        "comments_via_post": [
+          {
+            "id": "rec_c1",
+            "post": "rec_abc",
+            "text": "Nice post",
+            "expand": { "user": { "id": "rec_user2", "name": "Jane" } }
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+Each level is rule-checked against the **target** collection: forward expansion honors the target's view rule, back-relations honor the target's list rule, and locked targets are silently skipped for non-superusers. Back-relations return at most 1000 related records per request (newest first).
+
 ---
 
 ## Record Authentication (Auth Collections)
@@ -288,7 +369,7 @@ Authenticate with email/username and password.
 ```json
 {
   "token": "eyJhbGci...",
-  "refresh_token": "eyJhbGci...",
+  "refreshToken": "eyJhbGci...",
   "record": {
     "id": "rec_user1",
     "email": "user@example.com",
@@ -296,6 +377,16 @@ Authenticate with email/username and password.
   }
 }
 ```
+
+### `POST /collections/{collection}/auth/auth-with-anonymous`
+Create and sign in a throwaway anonymous record. No request body.
+
+Disabled by default — the auth collection must opt in via the `allowAnonymous` collection option (a toggle in the dashboard schema editor). Returns `403` otherwise.
+
+**Response** `200 OK` — same shape as `auth-with-password`. The issued token carries an `anonymous` claim that survives `auth-refresh`. Rules can gate anonymous users with the `@request.auth.anonymous` macro (e.g. `@request.auth.anonymous = false`). To convert an anonymous user into a real account, set an identity (email) and password on the record later — the user keeps their id and data.
+
+### `POST /collections/{collection}/auth/auth-refresh`
+Refresh a record auth token with `{ "refreshToken": "..." }`.
 
 ### `POST /collections/{collection}/auth/auth-otp-request`
 Request a one-time password.
@@ -318,6 +409,38 @@ Confirm email verification.
 ### `GET /collections/{collection}/auth/oauth2/{provider}`
 Initiate OAuth2 flow. Redirects to the provider.
 
+### Passkeys (WebAuthn)
+
+Requires `allowPasskeys: true` in the collection's options (off by default —
+endpoints return 403 otherwise). A passkey is a full possession+verification
+factor; login mints the same token response as `auth-with-password`.
+
+### `POST /collections/{collection}/auth/passkey/register-begin`
+Start passkey registration for the **authenticated** record (record token
+required). Returns WebAuthn `CredentialCreation` options; the challenge is
+valid for 5 minutes.
+
+### `POST /collections/{collection}/auth/passkey/register-finish`
+Complete registration with the authenticator's response. Optional `"name"` in
+the body labels the passkey. Returns the stored passkey descriptor.
+
+### `POST /collections/{collection}/auth/passkey/login-begin`
+Start passkey login (no auth, rate limited). With no body, returns options for
+**discoverable** credentials; with `{"email": "..."}`, scopes
+`allowCredentials` to that account — unknown emails get the same empty-list
+response as accounts without passkeys (no enumeration).
+
+### `POST /collections/{collection}/auth/passkey/login-finish`
+Verify the assertion and authenticate. Response shape matches
+`auth-with-password` (token + record).
+
+### `GET /collections/{collection}/auth/passkeys`
+List the authenticated record's passkeys (`id`, `name`, `created`,
+`last_used_at` — never credential material).
+
+### `DELETE /collections/{collection}/auth/passkeys/{id}`
+Delete one of the authenticated record's own passkeys.
+
 ---
 
 ## Files
@@ -328,7 +451,16 @@ Download a file.
 **Query Parameters**
 | Param | Type | Description |
 |-------|------|-------------|
-| thumb | string | Thumbnail size (e.g., `100x100`) |
+| thumb | string | Thumbnail size: `100x100` (center crop), `100x100t` (top crop), `100x100f` (fit, no crop), `100x` / `x100` (single axis). Max 2048px per side |
+| format | string | Convert the image output: `jpeg` or `png` (requires `thumb`) |
+| quality | int | JPEG encode quality, `1`–`100` (requires `thumb`) |
+
+**Example**
+```
+GET /api/v1/files/posts/rec_abc/cover.png?thumb=300x200&format=jpeg&quality=80
+```
+
+Each variant is generated once and cached; cached variants are served through the same rule-checked download path as the original. Invalid `format`/`quality` values return `400`; a `thumb` request on a non-image file falls back to the original. WebP sources are decoded, but WebP **output** is not supported.
 
 ### File Upload
 Files are uploaded as part of record creation/update using `multipart/form-data`:
@@ -347,6 +479,28 @@ Content-Type: image/jpeg
 --boundary--
 ```
 
+### Resumable Uploads (TUS)
+
+`/api/v1/files/tus/` implements the [TUS 1.0 protocol](https://tus.io)
+(`creation`, `creation-with-upload`, `termination`, `expiration`) for
+attaching large files to **existing** records. Required `Upload-Metadata`
+keys (base64-encoded per the TUS spec): `collection`, `recordId`, `field`,
+`filename`.
+
+```
+POST /api/v1/files/tus/            # create upload (auth + update rule checked)
+PATCH /api/v1/files/tus/{id}       # send chunks (resumable)
+HEAD /api/v1/files/tus/{id}        # retrieve current offset
+DELETE /api/v1/files/tus/{id}      # terminate (same identity only)
+```
+
+The collection's update rule is enforced at creation and re-checked at
+completion; field `mimeTypes`/`max_size`/`maxSelect` constraints are validated
+against the actual bytes before the file is attached and the record update is
+broadcast to realtime subscribers. Unfinished uploads expire after 24 hours.
+Works with any TUS client, e.g. `tus-js-client` pointed at the endpoint with
+an `Authorization` header.
+
 ---
 
 ## Realtime
@@ -359,10 +513,12 @@ Upgrade to WebSocket for real-time events.
 {
   "type": "subscribe",
   "clientId": "client_abc123",
-  "channel": "posts",
-  "subscriptions": ["posts"]
+  "subscriptions": ["posts/*"],
+  "options": { "presence": { "name": "Ada" } }
 }
 ```
+
+`options.presence` is optional, arbitrary client state — when set, the subscription opts into presence (see [Presence](#presence)).
 
 **Event Messages (received)**
 ```json
@@ -380,6 +536,48 @@ Upgrade to WebSocket for real-time events.
 ### SSE `GET /sse`
 Server-Sent Events for real-time updates.
 Same message format as WebSocket.
+
+### `POST /realtime/broadcast`
+Publish a message to a custom realtime channel. Requires authentication (admin or record auth).
+
+**Request Body**
+```json
+{
+  "channel": "room:1",
+  "event": "typing",
+  "data": { "user": "Ada" }
+}
+```
+
+**Response** `204 No Content`
+
+`event` defaults to `message`. Reserved server event names (`record:*`, `connection:*`, `subscription:*`, `presence*`) and channels that shadow a collection's record topics are rejected with `400`, so client broadcasts can never spoof server events. On multi-node deployments broadcasts reach subscribers on every node via PostgreSQL LISTEN/NOTIFY.
+
+### Presence
+A subscription with `options.presence` set announces the client on the topic: other subscribers receive `presence:join` / `presence:leave` events with `{ "client_id": "...", "state": { ... } }`. Query the current members with a `presence` message:
+
+```json
+{ "type": "presence", "clientId": "client_abc123", "channel": "room:1" }
+```
+
+**Response message**
+```json
+{
+  "client_id": "client_abc123",
+  "event": "presence",
+  "topic": "room:1",
+  "data": {
+    "topic": "room:1",
+    "clients": 2,
+    "members": [
+      { "client_id": "client_abc123", "state": { "name": "Ada" } }
+    ]
+  },
+  "timestamp": 1700000000000
+}
+```
+
+`clients` counts all subscribers of the topic; `members` lists only those that declared presence state. On multi-node deployments presence member lists are node-local.
 
 ---
 
@@ -451,10 +649,20 @@ Revoke an API key.
 ## Settings
 
 ### `GET /settings`
-Get all application settings.
+Get all application settings. Includes the `email_templates` section: a map of
+template id → `{subject, body}` overrides (empty/missing = built-in default).
 
 ### `PUT /settings`
-Update application settings.
+Update application settings. Email template overrides are validated at save
+time (parse + trial render); invalid templates are rejected with a 400 keyed
+`email_templates.<id>`. Saving an entry with empty subject and body resets that
+template to its default.
+
+### `GET /settings/email-templates`
+List all email templates with metadata for editors:
+`[{id, name, description, placeholders[], defaultSubject, defaultBody, customSubject?, customBody?}]`.
+Template ids: `verification`, `otp`, `magic_link`, `password_reset`,
+`email_change`, `auth_alert`, `backup`, `backup_failed`.
 
 ---
 
@@ -570,6 +778,7 @@ field operator value
 | `@request.auth.id` | Authenticated user ID |
 | `@request.auth.role` | Authenticated user role |
 | `@request.auth.collection` | Auth collection name |
+| `@request.auth.anonymous` | `true` for anonymous sign-ins |
 | `@now` | Current timestamp |
 
 ---

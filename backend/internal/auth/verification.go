@@ -10,6 +10,8 @@ import (
 
 	"github.com/gresbase/gresbase/internal/database"
 	"github.com/gresbase/gresbase/internal/mailer"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog/log"
 )
 
@@ -24,6 +26,14 @@ func NewVerificationService(db *database.DB, mailer *mailer.Service) *Verificati
 	return &VerificationService{db: db, mailer: mailer}
 }
 
+func (s *VerificationService) exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return s.db.ExecResult(ctx, sql, args...)
+}
+
+func (s *VerificationService) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return s.db.QueryRow(ctx, sql, args...)
+}
+
 // ---------------------------------------------------------------------------
 // Email Verification
 // ---------------------------------------------------------------------------
@@ -34,7 +44,7 @@ func (s *VerificationService) RequestEmailVerification(ctx context.Context, admi
 	tokenHash := hashToken(token)
 	expiresAt := time.Now().Add(24 * time.Hour)
 
-	_, err := s.db.Pool.Exec(ctx, `
+	_, err := s.exec(ctx, `
 		INSERT INTO _verifications (id, admin_id, token_hash, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $5)`,
 		generateID16(), adminID, tokenHash, expiresAt, time.Now(),
@@ -61,39 +71,36 @@ func (s *VerificationService) RequestEmailVerification(ctx context.Context, admi
 func (s *VerificationService) ConfirmEmailVerification(ctx context.Context, token string) error {
 	tokenHash := hashToken(token)
 
-	result, err := s.db.Pool.Exec(ctx, `
-		DELETE FROM _verifications WHERE token_hash = $1 AND expires_at > $2`,
-		tokenHash, time.Now(),
-	)
-	if err != nil {
-		return fmt.Errorf("verify token: %w", err)
-	}
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("invalid or expired verification token")
-	}
+	return s.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
+		var adminID string
+		if err := s.queryRow(txCtx, `
+			SELECT admin_id FROM _verifications WHERE token_hash = $1 AND expires_at > $2`,
+			tokenHash, time.Now(),
+		).Scan(&adminID); err != nil {
+			return fmt.Errorf("invalid or expired verification token")
+		}
 
-	// Mark admin as verified
-	var adminID string
-	err = s.db.Pool.QueryRow(ctx, `
-		UPDATE _admins SET verified = TRUE, updated_at = $1
-		WHERE id = (SELECT admin_id FROM _verifications WHERE token_hash = $2)
-		RETURNING id`,
-		time.Now(), tokenHash,
-	).Scan(&adminID)
+		result, err := s.exec(txCtx, `DELETE FROM _verifications WHERE token_hash = $1`, tokenHash)
+		if err != nil {
+			return fmt.Errorf("verify token: %w", err)
+		}
+		if result.RowsAffected() == 0 {
+			return fmt.Errorf("invalid or expired verification token")
+		}
 
-	if err != nil {
-		// Fallback: try to find by token
-		return fmt.Errorf("mark verified: %w", err)
-	}
+		if _, err := s.exec(txCtx, `UPDATE _admins SET verified = TRUE, updated_at = $1 WHERE id = $2`, time.Now(), adminID); err != nil {
+			return fmt.Errorf("mark verified: %w", err)
+		}
 
-	log.Info().Str("admin_id", adminID).Msg("Email verified")
-	return nil
+		log.Info().Str("admin_id", adminID).Msg("Email verified")
+		return nil
+	})
 }
 
 // IsVerified checks if a user's email is verified.
 func (s *VerificationService) IsVerified(ctx context.Context, adminID string) bool {
 	var verified bool
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		"SELECT COALESCE(verified, FALSE) FROM _admins WHERE id = $1", adminID,
 	).Scan(&verified)
 	return err == nil && verified
@@ -108,7 +115,7 @@ func (s *VerificationService) RequestPasswordReset(ctx context.Context, email st
 	// Find admin by email (don't reveal if user doesn't exist for security)
 	var adminID string
 	var adminEmail string
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		"SELECT id, email FROM _admins WHERE email = $1", email,
 	).Scan(&adminID, &adminEmail)
 	if err != nil {
@@ -121,7 +128,7 @@ func (s *VerificationService) RequestPasswordReset(ctx context.Context, email st
 	tokenHash := hashToken(token)
 	expiresAt := time.Now().Add(1 * time.Hour)
 
-	_, err = s.db.Pool.Exec(ctx, `
+	_, err = s.exec(ctx, `
 		INSERT INTO _password_resets (id, admin_id, token_hash, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $5)`,
 		generateID16(), adminID, tokenHash, expiresAt, time.Now(),
@@ -149,7 +156,7 @@ func (s *VerificationService) ConfirmPasswordReset(ctx context.Context, token, n
 	tokenHash := hashToken(token)
 
 	var adminID string
-	err := s.db.Pool.QueryRow(ctx, `
+	err := s.queryRow(ctx, `
 		SELECT admin_id FROM _password_resets
 		WHERE token_hash = $1 AND expires_at > $2`,
 		tokenHash, time.Now(),
@@ -166,7 +173,7 @@ func (s *VerificationService) ConfirmPasswordReset(ctx context.Context, token, n
 	}
 
 	// Update password and clean up token
-	_, err = s.db.Pool.Exec(ctx, `
+	_, err = s.exec(ctx, `
 		UPDATE _admins SET password_hash = $1, updated_at = $2 WHERE id = $3`,
 		passwordHash, time.Now(), adminID,
 	)
@@ -175,7 +182,7 @@ func (s *VerificationService) ConfirmPasswordReset(ctx context.Context, token, n
 	}
 
 	// Delete used token
-	s.db.Pool.Exec(ctx, "DELETE FROM _password_resets WHERE token_hash = $1", tokenHash)
+	s.exec(ctx, "DELETE FROM _password_resets WHERE token_hash = $1", tokenHash)
 
 	log.Info().Str("admin_id", adminID).Msg("Password reset confirmed")
 	return nil
@@ -191,7 +198,7 @@ func (s *VerificationService) RequestEmailChange(ctx context.Context, adminID, n
 	tokenHash := hashToken(token)
 	expiresAt := time.Now().Add(1 * time.Hour)
 
-	_, err := s.db.Pool.Exec(ctx, `
+	_, err := s.exec(ctx, `
 		INSERT INTO _email_changes (id, admin_id, new_email, token_hash, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
 		generateID16(), adminID, newEmail, tokenHash, expiresAt, time.Now(),
@@ -219,7 +226,7 @@ func (s *VerificationService) ConfirmEmailChange(ctx context.Context, token stri
 	tokenHash := hashToken(token)
 
 	var adminID, newEmail string
-	err := s.db.Pool.QueryRow(ctx, `
+	err := s.queryRow(ctx, `
 		SELECT admin_id, new_email FROM _email_changes
 		WHERE token_hash = $1 AND expires_at > $2`,
 		tokenHash, time.Now(),
@@ -230,7 +237,7 @@ func (s *VerificationService) ConfirmEmailChange(ctx context.Context, token stri
 	}
 
 	// Update email
-	_, err = s.db.Pool.Exec(ctx,
+	_, err = s.exec(ctx,
 		"UPDATE _admins SET email = $1, updated_at = $2 WHERE id = $3",
 		newEmail, time.Now(), adminID,
 	)
@@ -239,7 +246,7 @@ func (s *VerificationService) ConfirmEmailChange(ctx context.Context, token stri
 	}
 
 	// Clean up
-	s.db.Pool.Exec(ctx, "DELETE FROM _email_changes WHERE admin_id = $1", adminID)
+	s.exec(ctx, "DELETE FROM _email_changes WHERE admin_id = $1", adminID)
 
 	log.Info().Str("admin_id", adminID).Str("new_email", newEmail).Msg("Email change confirmed")
 	return nil
@@ -252,7 +259,7 @@ func (s *VerificationService) ConfirmEmailChange(ctx context.Context, token stri
 // RequestMagicLink sends a magic link for passwordless login.
 func (s *VerificationService) RequestMagicLink(ctx context.Context, email string) error {
 	var adminID, adminEmail string
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		"SELECT id, email FROM _admins WHERE email = $1", email,
 	).Scan(&adminID, &adminEmail)
 	if err != nil {
@@ -264,7 +271,7 @@ func (s *VerificationService) RequestMagicLink(ctx context.Context, email string
 	tokenHash := hashToken(token)
 	expiresAt := time.Now().Add(15 * time.Minute)
 
-	_, err = s.db.Pool.Exec(ctx, `
+	_, err = s.exec(ctx, `
 		INSERT INTO _magic_links (id, admin_id, token_hash, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $5)`,
 		generateID16(), adminID, tokenHash, expiresAt, time.Now(),
@@ -291,7 +298,7 @@ func (s *VerificationService) VerifyMagicLink(ctx context.Context, token string)
 	tokenHash := hashToken(token)
 
 	var adminID string
-	err := s.db.Pool.QueryRow(ctx, `
+	err := s.queryRow(ctx, `
 		SELECT admin_id FROM _magic_links
 		WHERE token_hash = $1 AND expires_at > $2`,
 		tokenHash, time.Now(),
@@ -302,7 +309,7 @@ func (s *VerificationService) VerifyMagicLink(ctx context.Context, token string)
 	}
 
 	// Delete used token
-	s.db.Pool.Exec(ctx, "DELETE FROM _magic_links WHERE token_hash = $1", tokenHash)
+	s.exec(ctx, "DELETE FROM _magic_links WHERE token_hash = $1", tokenHash)
 
 	return adminID, nil
 }
@@ -314,7 +321,7 @@ func (s *VerificationService) VerifyMagicLink(ctx context.Context, token string)
 // RequestOTP sends a one-time password to the user's email.
 func (s *VerificationService) RequestOTP(ctx context.Context, email string) error {
 	var adminID string
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		"SELECT id FROM _admins WHERE email = $1", email,
 	).Scan(&adminID)
 	if err != nil {
@@ -326,7 +333,7 @@ func (s *VerificationService) RequestOTP(ctx context.Context, email string) erro
 	codeHash := hashToken(code)
 	expiresAt := time.Now().Add(5 * time.Minute)
 
-	_, err = s.db.Pool.Exec(ctx, `
+	_, err = s.exec(ctx, `
 		INSERT INTO _otp (id, admin_id, code_hash, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $5)`,
 		generateID16(), adminID, codeHash, expiresAt, time.Now(),
@@ -350,7 +357,7 @@ func (s *VerificationService) RequestOTP(ctx context.Context, email string) erro
 // VerifyOTP validates an OTP code and returns the admin ID.
 func (s *VerificationService) VerifyOTP(ctx context.Context, email, code string) (string, error) {
 	var adminID string
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		"SELECT id FROM _admins WHERE email = $1", email,
 	).Scan(&adminID)
 	if err != nil {
@@ -359,7 +366,7 @@ func (s *VerificationService) VerifyOTP(ctx context.Context, email, code string)
 
 	codeHash := hashToken(code)
 
-	result, err := s.db.Pool.Exec(ctx, `
+	result, err := s.exec(ctx, `
 		DELETE FROM _otp WHERE admin_id = $1 AND code_hash = $2 AND expires_at > $3`,
 		adminID, codeHash, time.Now(),
 	)

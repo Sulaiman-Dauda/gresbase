@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/gresbase/gresbase/internal/database"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog/log"
 )
 
@@ -28,16 +30,24 @@ func NewMFAService(db *database.DB) *MFAService {
 	return &MFAService{db: db}
 }
 
+func (s *MFAService) exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return s.db.ExecResult(ctx, sql, args...)
+}
+
+func (s *MFAService) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return s.db.QueryRow(ctx, sql, args...)
+}
+
 // MFASecret is a generated TOTP secret for a user.
 type MFASecret struct {
-	ID        string    `json:"id"`
-	AdminID   string    `json:"admin_id"`
-	Secret    string    `json:"secret"`    // base32 encoded secret
-	QRCodeURL string    `json:"qr_code_url,omitempty"`
-	Enabled   bool      `json:"enabled"`
-	BackupCodes []string `json:"backup_codes,omitempty"` // hashed
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	AdminID     string    `json:"admin_id"`
+	Secret      string    `json:"secret"` // base32 encoded secret
+	QRCodeURL   string    `json:"qr_code_url,omitempty"`
+	Enabled     bool      `json:"enabled"`
+	BackupCodes []string  `json:"backup_codes,omitempty"` // hashed
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // MFAToken represents a TOTP token validation.
@@ -67,7 +77,7 @@ func (s *MFAService) GenerateSecret(ctx context.Context, adminID, email, issuer 
 	}
 
 	// Store in database
-	_, err := s.db.Pool.Exec(ctx, `
+	_, err := s.exec(ctx, `
 		INSERT INTO _mfa_secrets (id, admin_id, secret, enabled, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (admin_id) DO UPDATE SET secret = $3, enabled = FALSE, updated_at = $6`,
@@ -85,7 +95,7 @@ func (s *MFAService) GenerateSecret(ctx context.Context, adminID, email, issuer 
 func (s *MFAService) VerifyAndEnable(ctx context.Context, adminID, code string) ([]string, error) {
 	// Retrieve secret
 	var secret string
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		"SELECT secret FROM _mfa_secrets WHERE admin_id = $1 AND enabled = FALSE",
 		adminID,
 	).Scan(&secret)
@@ -103,7 +113,7 @@ func (s *MFAService) VerifyAndEnable(ctx context.Context, adminID, code string) 
 	backupCodesJSON, _ := json.Marshal(backupCodes)
 
 	// Enable MFA
-	_, err = s.db.Pool.Exec(ctx, `
+	_, err = s.exec(ctx, `
 		UPDATE _mfa_secrets SET enabled = TRUE, backup_codes = $3, updated_at = $4
 		WHERE admin_id = $1 AND secret = $2`,
 		adminID, secret, backupCodesJSON, time.Now(),
@@ -121,7 +131,7 @@ func (s *MFAService) ValidateToken(ctx context.Context, adminID, code string) (b
 	// Try TOTP first
 	var secret string
 	var enabled bool
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		"SELECT secret, enabled FROM _mfa_secrets WHERE admin_id = $1",
 		adminID,
 	).Scan(&secret, &enabled)
@@ -140,7 +150,7 @@ func (s *MFAService) ValidateToken(ctx context.Context, adminID, code string) (b
 
 	// Try backup codes
 	var backupCodesJSON []byte
-	err = s.db.Pool.QueryRow(ctx,
+	err = s.queryRow(ctx,
 		"SELECT backup_codes FROM _mfa_secrets WHERE admin_id = $1",
 		adminID,
 	).Scan(&backupCodesJSON)
@@ -155,7 +165,7 @@ func (s *MFAService) ValidateToken(ctx context.Context, adminID, code string) (b
 					// Remove used backup code
 					backupCodes = append(backupCodes[:i], backupCodes[i+1:]...)
 					newJSON, _ := json.Marshal(backupCodes)
-					s.db.Pool.Exec(ctx, "UPDATE _mfa_secrets SET backup_codes = $1 WHERE admin_id = $2",
+					s.exec(ctx, "UPDATE _mfa_secrets SET backup_codes = $1 WHERE admin_id = $2",
 						newJSON, adminID)
 					return true, nil
 				}
@@ -168,7 +178,7 @@ func (s *MFAService) ValidateToken(ctx context.Context, adminID, code string) (b
 
 // DisableMFA disables MFA for a user.
 func (s *MFAService) DisableMFA(ctx context.Context, adminID string) error {
-	_, err := s.db.Pool.Exec(ctx,
+	_, err := s.exec(ctx,
 		"UPDATE _mfa_secrets SET enabled = FALSE, updated_at = $2 WHERE admin_id = $1",
 		adminID, time.Now(),
 	)
@@ -182,7 +192,7 @@ func (s *MFAService) DisableMFA(ctx context.Context, adminID string) error {
 // IsMFAEnabled checks if MFA is enabled for a user.
 func (s *MFAService) IsMFAEnabled(ctx context.Context, adminID string) bool {
 	var enabled bool
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		"SELECT enabled FROM _mfa_secrets WHERE admin_id = $1",
 		adminID,
 	).Scan(&enabled)

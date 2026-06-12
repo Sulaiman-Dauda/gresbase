@@ -60,19 +60,19 @@ func (k Kind) String() string {
 type Op string
 
 const (
-	OpAnd   Op = "&&"
-	OpOr    Op = "||"
-	OpEq    Op = "="
-	OpNeq   Op = "!="
-	OpGt    Op = ">"
-	OpGte   Op = ">="
-	OpLt    Op = "<"
-	OpLte   Op = "<="
-	OpLike  Op = "~"   // contains (LIKE %value%)
-	OpNLike Op = "!~"  // not contains
-	OpIn    Op = "?="   // value in array/JSON
-	OpNIn   Op = "?!="  // value not in array/JSON
-	OpILike Op = "?~"   // array contains like
+	OpAnd    Op = "&&"
+	OpOr     Op = "||"
+	OpEq     Op = "="
+	OpNeq    Op = "!="
+	OpGt     Op = ">"
+	OpGte    Op = ">="
+	OpLt     Op = "<"
+	OpLte    Op = "<="
+	OpLike   Op = "~"   // contains (LIKE %value%)
+	OpNLike  Op = "!~"  // not contains
+	OpIn     Op = "?="  // value in array/JSON
+	OpNIn    Op = "?!=" // value not in array/JSON
+	OpILike  Op = "?~"  // array contains like
 	OpNILike Op = "?!~" // array not contains like
 )
 
@@ -337,6 +337,10 @@ func (t *tokenizer) readIdent() token {
 		return token{kind: tokBool, value: "false"}
 	case "null", "nil":
 		return token{kind: tokNull, value: "null"}
+	case "and":
+		return token{kind: tokAnd, value: "&&"}
+	case "or":
+		return token{kind: tokOr, value: "||"}
 	}
 
 	return token{kind: tokIdent, value: value}
@@ -424,19 +428,32 @@ func (p *parser) parseComparison() *Expr {
 
 func (p *parser) tokenToOp() Op {
 	switch p.cur.kind {
-	case tokEq: return OpEq
-	case tokNeq: return OpNeq
-	case tokGt: return OpGt
-	case tokGte: return OpGte
-	case tokLt: return OpLt
-	case tokLte: return OpLte
-	case tokLike: return OpLike
-	case tokNLike: return OpNLike
-	case tokIn: return OpIn
-	case tokNIn: return OpNIn
-	case tokILike: return OpILike
-	case tokNILike: return OpNILike
-	default: return OpEq
+	case tokEq:
+		return OpEq
+	case tokNeq:
+		return OpNeq
+	case tokGt:
+		return OpGt
+	case tokGte:
+		return OpGte
+	case tokLt:
+		return OpLt
+	case tokLte:
+		return OpLte
+	case tokLike:
+		return OpLike
+	case tokNLike:
+		return OpNLike
+	case tokIn:
+		return OpIn
+	case tokNIn:
+		return OpNIn
+	case tokILike:
+		return OpILike
+	case tokNILike:
+		return OpNILike
+	default:
+		return OpEq
 	}
 }
 
@@ -487,6 +504,10 @@ func (p *parser) parsePrimary() *Expr {
 type SQLBuilder struct {
 	// placeholders is the current parameter counter
 	placeholders int
+	// startPlaceholder is the first parameter number to emit ($1 by default);
+	// callers combining multiple compiled fragments into one statement must
+	// offset each fragment past the args already collected.
+	startPlaceholder int
 	// params collects query parameters
 	params []any
 	// fieldMapping maps filter field names to SQL column expressions
@@ -496,10 +517,19 @@ type SQLBuilder struct {
 // NewSQLBuilder creates a SQL builder with default field mapping (direct column names).
 func NewSQLBuilder() *SQLBuilder {
 	return &SQLBuilder{
-		placeholders: 1,
-		params:       make([]any, 0),
-		fieldMapping: make(map[string]string),
+		placeholders:     1,
+		startPlaceholder: 1,
+		params:           make([]any, 0),
+		fieldMapping:     make(map[string]string),
 	}
+}
+
+// WithParamOffset sets the first placeholder number emitted by Build.
+func (b *SQLBuilder) WithParamOffset(start int) *SQLBuilder {
+	if start > 0 {
+		b.startPlaceholder = start
+	}
+	return b
 }
 
 // WithFieldMapping sets a custom field name to SQL expression mapping.
@@ -516,7 +546,7 @@ func (b *SQLBuilder) Build(expr *Expr) (string, []any, error) {
 	}
 
 	b.params = b.params[:0]
-	b.placeholders = 1
+	b.placeholders = b.startPlaceholder
 
 	sql, err := b.buildNode(expr)
 	if err != nil {
@@ -538,9 +568,13 @@ func (b *SQLBuilder) buildNode(e *Expr) (string, error) {
 	switch e.Kind {
 	case KindBinOp:
 		left, err := b.buildNode(e.Left)
-		if err != nil { return "", err }
+		if err != nil {
+			return "", err
+		}
 		right, err := b.buildNode(e.Right)
-		if err != nil { return "", err }
+		if err != nil {
+			return "", err
+		}
 		switch e.Op {
 		case OpAnd:
 			return fmt.Sprintf("(%s AND %s)", left, right), nil
@@ -555,12 +589,16 @@ func (b *SQLBuilder) buildNode(e *Expr) (string, error) {
 
 	case KindParen:
 		inner, err := b.buildNode(e.Left)
-		if err != nil { return "", err }
+		if err != nil {
+			return "", err
+		}
 		return fmt.Sprintf("(%s)", inner), nil
 
 	case KindNot:
 		inner, err := b.buildNode(e.Left)
-		if err != nil { return "", err }
+		if err != nil {
+			return "", err
+		}
 		return fmt.Sprintf("NOT (%s)", inner), nil
 
 	default:
@@ -649,13 +687,20 @@ func (b *SQLBuilder) buildComparison(e *Expr) (string, error) {
 
 func (b *SQLBuilder) buildFieldToField(col string, op Op, otherCol string) string {
 	switch op {
-	case OpEq: return fmt.Sprintf("%s = %s", col, otherCol)
-	case OpNeq: return fmt.Sprintf("%s != %s", col, otherCol)
-	case OpGt: return fmt.Sprintf("%s > %s", col, otherCol)
-	case OpGte: return fmt.Sprintf("%s >= %s", col, otherCol)
-	case OpLt: return fmt.Sprintf("%s < %s", col, otherCol)
-	case OpLte: return fmt.Sprintf("%s <= %s", col, otherCol)
-	default: return "TRUE"
+	case OpEq:
+		return fmt.Sprintf("%s = %s", col, otherCol)
+	case OpNeq:
+		return fmt.Sprintf("%s != %s", col, otherCol)
+	case OpGt:
+		return fmt.Sprintf("%s > %s", col, otherCol)
+	case OpGte:
+		return fmt.Sprintf("%s >= %s", col, otherCol)
+	case OpLt:
+		return fmt.Sprintf("%s < %s", col, otherCol)
+	case OpLte:
+		return fmt.Sprintf("%s <= %s", col, otherCol)
+	default:
+		return "TRUE"
 	}
 }
 
@@ -708,19 +753,27 @@ func (e *RuleEvaluator) evalNode(node *Expr, record map[string]any) (bool, error
 	switch node.Kind {
 	case KindBinOp:
 		left, err := e.evalNode(node.Left, record)
-		if err != nil { return false, err }
+		if err != nil {
+			return false, err
+		}
 		switch node.Op {
 		case OpAnd:
-			if !left { return false, nil }
+			if !left {
+				return false, nil
+			}
 			return e.evalNode(node.Right, record)
 		case OpOr:
-			if left { return true, nil }
+			if left {
+				return true, nil
+			}
 			return e.evalNode(node.Right, record)
 		}
 
 	case KindNot:
 		v, err := e.evalNode(node.Left, record)
-		if err != nil { return false, err }
+		if err != nil {
+			return false, err
+		}
 		return !v, nil
 
 	case KindCompOp:
@@ -746,7 +799,9 @@ func (e *RuleEvaluator) evalComparison(node *Expr, record map[string]any) (bool,
 		if e.Resolver != nil {
 			var err error
 			fieldVal, err = e.Resolver(fieldName)
-			if err != nil { return false, err }
+			if err != nil {
+				return false, err
+			}
 		}
 	} else {
 		var ok bool
@@ -759,7 +814,19 @@ func (e *RuleEvaluator) evalComparison(node *Expr, record map[string]any) (bool,
 
 	rightVal := node.Right.Value
 	if node.Right.Kind == KindIdent {
-		rightVal = record[node.Right.Ident]
+		if strings.HasPrefix(node.Right.Ident, "@") {
+			if e.Resolver != nil {
+				var err error
+				rightVal, err = e.Resolver(node.Right.Ident)
+				if err != nil {
+					return false, err
+				}
+			} else {
+				rightVal = nil
+			}
+		} else {
+			rightVal = record[node.Right.Ident]
+		}
 	}
 
 	return compare(fieldVal, node.Op, rightVal)
@@ -789,8 +856,12 @@ func compare(left any, op Op, right any) (bool, error) {
 }
 
 func isEqual(a, b any) bool {
-	if a == nil && b == nil { return true }
-	if a == nil || b == nil { return false }
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
 
 	sa := fmt.Sprintf("%v", a)
 	sb := fmt.Sprintf("%v", b)
@@ -805,20 +876,29 @@ func compareNumbers(a any, op Op, b any) (bool, error) {
 		sa := fmt.Sprintf("%v", a)
 		sb := fmt.Sprintf("%v", b)
 		switch op {
-		case OpGt: return sa > sb, nil
-		case OpGte: return sa >= sb, nil
-		case OpLt: return sa < sb, nil
-		case OpLte: return sa <= sb, nil
+		case OpGt:
+			return sa > sb, nil
+		case OpGte:
+			return sa >= sb, nil
+		case OpLt:
+			return sa < sb, nil
+		case OpLte:
+			return sa <= sb, nil
 		}
 		return false, nil
 	}
 
 	switch op {
-	case OpGt: return fa > fb, nil
-	case OpGte: return fa >= fb, nil
-	case OpLt: return fa < fb, nil
-	case OpLte: return fa <= fb, nil
-	default: return false, nil
+	case OpGt:
+		return fa > fb, nil
+	case OpGte:
+		return fa >= fb, nil
+	case OpLt:
+		return fa < fb, nil
+	case OpLte:
+		return fa <= fb, nil
+	default:
+		return false, nil
 	}
 }
 
@@ -834,18 +914,24 @@ func arrayContains(haystack, needle any) (bool, error) {
 	switch v := haystack.(type) {
 	case []any:
 		for _, item := range v {
-			if fmt.Sprintf("%v", item) == ns { return true, nil }
+			if fmt.Sprintf("%v", item) == ns {
+				return true, nil
+			}
 		}
 	case []string:
 		for _, item := range v {
-			if item == ns { return true, nil }
+			if item == ns {
+				return true, nil
+			}
 		}
 	case string:
 		// Try parsing as JSON array
 		var arr []any
 		if err := json.Unmarshal([]byte(v), &arr); err == nil {
 			for _, item := range arr {
-				if fmt.Sprintf("%v", item) == ns { return true, nil }
+				if fmt.Sprintf("%v", item) == ns {
+					return true, nil
+				}
 			}
 		}
 	}
@@ -854,15 +940,21 @@ func arrayContains(haystack, needle any) (bool, error) {
 
 func toFloat64(v any) (float64, bool) {
 	switch n := v.(type) {
-	case float64: return n, true
-	case float32: return float64(n), true
-	case int: return float64(n), true
-	case int64: return float64(n), true
-	case int32: return float64(n), true
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case int32:
+		return float64(n), true
 	case string:
 		f, err := strconv.ParseFloat(n, 64)
 		return f, err == nil
-	default: return 0, false
+	default:
+		return 0, false
 	}
 }
 
@@ -880,7 +972,13 @@ func ParseFilter(expr string) (*Expr, error) {
 
 // FilterToSQL converts a filter expression to a SQL WHERE clause with parameters.
 func FilterToSQL(expr *Expr, fieldMapping map[string]string) (string, []any, error) {
-	b := NewSQLBuilder()
+	return FilterToSQLOffset(expr, fieldMapping, 1)
+}
+
+// FilterToSQLOffset converts a filter expression to SQL with placeholders
+// starting at $paramOffset, for combining with already-parameterized clauses.
+func FilterToSQLOffset(expr *Expr, fieldMapping map[string]string, paramOffset int) (string, []any, error) {
+	b := NewSQLBuilder().WithParamOffset(paramOffset)
 	if fieldMapping != nil {
 		b.WithFieldMapping(fieldMapping)
 	}
@@ -910,14 +1008,20 @@ func ValidateFields(expr *Expr, validFields []string) error {
 func validateFieldsNode(node *Expr, validFields []string) error {
 	switch node.Kind {
 	case KindBinOp:
-		if err := validateFieldsNode(node.Left, validFields); err != nil { return err }
+		if err := validateFieldsNode(node.Left, validFields); err != nil {
+			return err
+		}
 		return validateFieldsNode(node.Right, validFields)
 	case KindCompOp:
 		if node.Left != nil && node.Left.Kind == KindIdent {
 			fieldName := node.Left.Ident
-			if strings.HasPrefix(fieldName, "@") { return nil }
+			if strings.HasPrefix(fieldName, "@") {
+				return nil
+			}
 			for _, f := range validFields {
-				if f == fieldName { return nil }
+				if f == fieldName {
+					return nil
+				}
 			}
 			return fmt.Errorf("unknown field: %q", fieldName)
 		}

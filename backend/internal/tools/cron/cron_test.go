@@ -41,7 +41,7 @@ func TestParseStandard(t *testing.T) {
 		"* * * * *",
 		"*/5 * * * *",
 		"0 0 * * *",
-		
+
 		"30 9 1 * *",
 	}
 

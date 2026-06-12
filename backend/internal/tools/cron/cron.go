@@ -11,12 +11,12 @@ import (
 
 // Schedule represents a parsed cron schedule.
 type Schedule struct {
-	minutes  []int
-	hours    []int
-	dom      []int // day of month
-	months   []int
-	dow      []int // day of week
-	raw      string
+	minutes []int
+	hours   []int
+	dom     []int // day of month
+	months  []int
+	dow     []int // day of week
+	raw     string
 }
 
 // Parse parses a cron expression into a Schedule.

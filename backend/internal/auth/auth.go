@@ -6,11 +6,13 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	stdsql "database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +20,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/gresbase/gresbase/internal/config"
 	"github.com/gresbase/gresbase/internal/database"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -50,6 +55,18 @@ type Service struct {
 // NewService creates a new auth service.
 func NewService(db *database.DB, cfg *config.Config) *Service {
 	return &Service{db: db, cfg: cfg}
+}
+
+func (s *Service) exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return s.db.ExecResult(ctx, sql, args...)
+}
+
+func (s *Service) query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return s.db.Query(ctx, sql, args...)
+}
+
+func (s *Service) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return s.db.QueryRow(ctx, sql, args...)
 }
 
 // HashPassword hashes a password using bcrypt.
@@ -97,12 +114,7 @@ func (s *Service) GenerateAdminToken(adminID, email, role, tenantID string) (str
 
 // ValidateToken validates a JWT and returns the claims.
 func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(s.cfg.JWTSecret), nil
-	})
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, jwtVerificationKeyFunc(s.cfg))
 
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: %w", err)
@@ -135,8 +147,7 @@ func (s *Service) generateToken(adminID, email, role, tenantID string, tokenType
 		Type:     tokenType,
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(s.cfg.JWTSecret))
+	tokenString, err := signClaims(s.cfg, claims)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
@@ -146,36 +157,42 @@ func (s *Service) generateToken(adminID, email, role, tenantID string, tokenType
 
 // Login authenticates an admin and returns tokens.
 func (s *Service) Login(ctx context.Context, email, password string) (string, string, *AdminUser, error) {
-	admin, err := s.FindAdminByEmail(ctx, email)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("invalid credentials")
-	}
+	var admin *AdminUser
+	var accessToken, refreshToken string
 
-	if !s.VerifyPassword(admin.PasswordHash, password) {
-		return "", "", nil, fmt.Errorf("invalid credentials")
-	}
+	err := s.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
+		var err error
+		admin, err = s.FindAdminByEmail(txCtx, email)
+		if err != nil {
+			return fmt.Errorf("invalid credentials")
+		}
 
-	accessToken, refreshToken, err := s.GenerateTokens(admin.ID, admin.Email, admin.Role, admin.TenantID)
+		if !s.VerifyPassword(admin.PasswordHash, password) {
+			return fmt.Errorf("invalid credentials")
+		}
+
+		accessToken, refreshToken, err = s.GenerateTokens(admin.ID, admin.Email, admin.Role, admin.TenantID)
+		if err != nil {
+			return err
+		}
+
+		if _, err = s.exec(txCtx, "UPDATE _admins SET last_login_at = NOW() WHERE id = $1", admin.ID); err != nil {
+			return fmt.Errorf("update last login: %w", err)
+		}
+
+		sessionID := uuid.New().String()
+		if _, err = s.exec(txCtx, `
+			INSERT INTO _sessions (id, admin_id, tenant_id, token, refresh_token, expires_at)
+			VALUES ($1, $2, $3, $4, $5, $6)`,
+			sessionID, admin.ID, admin.TenantID, accessToken, refreshToken,
+			time.Now().Add(s.cfg.RefreshTokenExpiry)); err != nil {
+			return fmt.Errorf("failed to create session: %w", err)
+		}
+
+		return nil
+	})
 	if err != nil {
 		return "", "", nil, err
-	}
-
-	// Update last login
-	_, err = s.db.Pool.Exec(ctx,
-		"UPDATE _admins SET last_login_at = NOW() WHERE id = $1", admin.ID)
-	if err != nil {
-		// Non-fatal
-	}
-
-	// Create session
-	sessionID := uuid.New().String()
-	_, err = s.db.Pool.Exec(ctx, `
-		INSERT INTO _sessions (id, admin_id, tenant_id, token, refresh_token, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		sessionID, admin.ID, admin.TenantID, accessToken, refreshToken,
-		time.Now().Add(s.cfg.RefreshTokenExpiry))
-	if err != nil {
-		return "", "", nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
 	return accessToken, refreshToken, admin, nil
@@ -183,45 +200,45 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, st
 
 // RefreshToken refreshes an access token using a refresh token.
 func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (string, string, error) {
-	// Validate the refresh token
 	claims, err := s.ValidateToken(refreshTokenStr)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid refresh token")
 	}
-
 	if claims.Type != RefreshToken {
 		return "", "", fmt.Errorf("not a refresh token")
 	}
 
-	// Verify session exists and is valid
-	var sessionID string
-	err = s.db.Pool.QueryRow(ctx, `
-		SELECT id FROM _sessions
-		WHERE refresh_token = $1 AND expires_at > NOW()`,
-		refreshTokenStr).Scan(&sessionID)
-	if err != nil {
-		return "", "", fmt.Errorf("session not found or expired")
-	}
+	var accessToken, refreshToken string
+	err = s.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
+		var sessionID string
+		if err := s.queryRow(txCtx, `
+			SELECT id FROM _sessions
+			WHERE refresh_token = $1 AND expires_at > NOW()`, refreshTokenStr).Scan(&sessionID); err != nil {
+			return fmt.Errorf("session not found or expired")
+		}
 
-	// Delete old session
-	s.db.Pool.Exec(ctx, "DELETE FROM _sessions WHERE id = $1", sessionID)
+		if _, err := s.exec(txCtx, "DELETE FROM _sessions WHERE id = $1", sessionID); err != nil {
+			return err
+		}
 
-	// Generate new tokens
-	accessToken, refreshToken, err := s.GenerateTokens(
-		claims.AdminID, claims.Email, claims.Role, claims.TenantID)
+		var err error
+		accessToken, refreshToken, err = s.GenerateTokens(claims.AdminID, claims.Email, claims.Role, claims.TenantID)
+		if err != nil {
+			return err
+		}
+
+		newSessionID := uuid.New().String()
+		if _, err = s.exec(txCtx, `
+			INSERT INTO _sessions (id, admin_id, tenant_id, token, refresh_token, expires_at)
+			VALUES ($1, $2, $3, $4, $5, $6)`,
+			newSessionID, claims.AdminID, claims.TenantID, accessToken, refreshToken,
+			time.Now().Add(s.cfg.RefreshTokenExpiry)); err != nil {
+			return fmt.Errorf("failed to create new session: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
 		return "", "", err
-	}
-
-	// Create new session
-	newSessionID := uuid.New().String()
-	_, err = s.db.Pool.Exec(ctx, `
-		INSERT INTO _sessions (id, admin_id, tenant_id, token, refresh_token, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		newSessionID, claims.AdminID, claims.TenantID, accessToken, refreshToken,
-		time.Now().Add(s.cfg.RefreshTokenExpiry))
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create new session: %w", err)
 	}
 
 	return accessToken, refreshToken, nil
@@ -229,7 +246,7 @@ func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (str
 
 // Logout invalidates a session.
 func (s *Service) Logout(ctx context.Context, token string) error {
-	_, err := s.db.Pool.Exec(ctx,
+	_, err := s.exec(ctx,
 		"DELETE FROM _sessions WHERE token = $1 OR refresh_token = $1", token)
 	return err
 }
@@ -249,7 +266,7 @@ func (s *Service) CreateAdmin(ctx context.Context, email, password, role, tenant
 		TenantID:     tenantID,
 	}
 
-	_, err = s.db.Pool.Exec(ctx, `
+	_, err = s.exec(ctx, `
 		INSERT INTO _admins (id, tenant_id, email, password_hash, role)
 		VALUES ($1, $2, $3, $4, $5)`,
 		admin.ID, admin.TenantID, admin.Email, admin.PasswordHash, admin.Role)
@@ -263,13 +280,14 @@ func (s *Service) CreateAdmin(ctx context.Context, email, password, role, tenant
 // FindAdminByEmail finds an admin by email.
 func (s *Service) FindAdminByEmail(ctx context.Context, email string) (*AdminUser, error) {
 	admin := &AdminUser{}
-	err := s.db.Pool.QueryRow(ctx, `
+	err := s.queryRow(ctx, `
 		SELECT id, tenant_id, email, password_hash, role, avatar,
+		       COALESCE(verified, FALSE) as verified,
 		       COALESCE(last_login_at, TIMESTAMP 'epoch') as last_login_at,
 		       created_at, updated_at
 		FROM _admins WHERE email = $1`, email).Scan(
 		&admin.ID, &admin.TenantID, &admin.Email, &admin.PasswordHash,
-		&admin.Role, &admin.Avatar, &admin.LastLoginAt,
+		&admin.Role, &admin.Avatar, &admin.Verified, &admin.LastLoginAt,
 		&admin.CreatedAt, &admin.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("admin not found: %w", err)
@@ -280,13 +298,14 @@ func (s *Service) FindAdminByEmail(ctx context.Context, email string) (*AdminUse
 // FindAdminByID finds an admin by ID.
 func (s *Service) FindAdminByID(ctx context.Context, id string) (*AdminUser, error) {
 	admin := &AdminUser{}
-	err := s.db.Pool.QueryRow(ctx, `
+	err := s.queryRow(ctx, `
 		SELECT id, tenant_id, email, password_hash, role, avatar,
+		       COALESCE(verified, FALSE) as verified,
 		       COALESCE(last_login_at, TIMESTAMP 'epoch') as last_login_at,
 		       created_at, updated_at
 		FROM _admins WHERE id = $1`, id).Scan(
 		&admin.ID, &admin.TenantID, &admin.Email, &admin.PasswordHash,
-		&admin.Role, &admin.Avatar, &admin.LastLoginAt,
+		&admin.Role, &admin.Avatar, &admin.Verified, &admin.LastLoginAt,
 		&admin.CreatedAt, &admin.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("admin not found: %w", err)
@@ -298,7 +317,7 @@ func (s *Service) FindAdminByID(ctx context.Context, id string) (*AdminUser, err
 // Used to determine if first-time setup is required.
 func (s *Service) CountAdmins(ctx context.Context) (int, error) {
 	var count int
-	err := s.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM _admins`).Scan(&count)
+	err := s.queryRow(ctx, `SELECT COUNT(*) FROM _admins`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count admins: %w", err)
 	}
@@ -307,8 +326,9 @@ func (s *Service) CountAdmins(ctx context.Context) (int, error) {
 
 // ListAdmins lists all admins for a tenant.
 func (s *Service) ListAdmins(ctx context.Context, tenantID string) ([]*AdminUser, error) {
-	rows, err := s.db.Pool.Query(ctx, `
+	rows, err := s.query(ctx, `
 		SELECT id, tenant_id, email, password_hash, role, avatar,
+		       COALESCE(verified, FALSE) as verified,
 		       COALESCE(last_login_at, TIMESTAMP 'epoch') as last_login_at,
 		       created_at, updated_at
 		FROM _admins WHERE tenant_id = $1
@@ -323,7 +343,7 @@ func (s *Service) ListAdmins(ctx context.Context, tenantID string) ([]*AdminUser
 		admin := &AdminUser{}
 		if err := rows.Scan(
 			&admin.ID, &admin.TenantID, &admin.Email, &admin.PasswordHash,
-			&admin.Role, &admin.Avatar, &admin.LastLoginAt,
+			&admin.Role, &admin.Avatar, &admin.Verified, &admin.LastLoginAt,
 			&admin.CreatedAt, &admin.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -332,20 +352,53 @@ func (s *Service) ListAdmins(ctx context.Context, tenantID string) ([]*AdminUser
 	return admins, nil
 }
 
+// ListAdminEmails returns the email of every superuser in the _admins table,
+// across all tenants. Used for instance-level operational alerts (e.g.
+// scheduled backup failures) that every superuser should hear about.
+func (s *Service) ListAdminEmails(ctx context.Context) ([]string, error) {
+	rows, err := s.query(ctx, `SELECT email FROM _admins ORDER BY email`)
+	if err != nil {
+		return nil, fmt.Errorf("list admin emails: %w", err)
+	}
+	defer rows.Close()
+
+	var emails []string
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		emails = append(emails, email)
+	}
+	return emails, rows.Err()
+}
+
 // DeleteAdmin deletes an admin.
 func (s *Service) DeleteAdmin(ctx context.Context, id string) error {
-	_, err := s.db.Pool.Exec(ctx, "DELETE FROM _admins WHERE id = $1", id)
+	_, err := s.exec(ctx, "DELETE FROM _admins WHERE id = $1", id)
 	return err
 }
 
 // UpdateAdmin updates an admin's fields.
 func (s *Service) UpdateAdmin(ctx context.Context, id string, updates map[string]any) error {
+	allowed := map[string]struct{}{
+		"email":         {},
+		"role":          {},
+		"avatar":        {},
+		"password_hash": {},
+		"tenant_id":     {},
+		"verified":      {},
+	}
+
 	setClauses := []string{}
 	args := []any{id}
 	i := 1
 	for k, v := range updates {
+		if _, ok := allowed[k]; !ok {
+			return fmt.Errorf("unsupported admin field %q", k)
+		}
 		i++
-		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", k, i))
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", database.QuoteIdent(k), i))
 		args = append(args, v)
 	}
 	if len(setClauses) == 0 {
@@ -356,7 +409,7 @@ func (s *Service) UpdateAdmin(ctx context.Context, id string, updates map[string
 	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", i))
 
 	sql := fmt.Sprintf("UPDATE _admins SET %s WHERE id = $1", strings.Join(setClauses, ", "))
-	_, err := s.db.Pool.Exec(ctx, sql, args...)
+	_, err := s.exec(ctx, sql, args...)
 	return err
 }
 
@@ -369,10 +422,17 @@ func (s *Service) RecordAudit(ctx context.Context, adminID, action, resource, re
 		userAgent = r.Header.Get("User-Agent")
 	}
 	tenantID := "default"
-	s.db.Pool.Exec(ctx,
+	if ctx != nil {
+		if ctxTenantID, ok := ctx.Value("tenant_id").(string); ok && ctxTenantID != "" {
+			tenantID = ctxTenantID
+		}
+	}
+	if _, err := s.exec(ctx,
 		`INSERT INTO _audit_logs (tenant_id, admin_id, action, resource, resource_id, data, ip, user_agent)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		tenantID, adminID, action, resource, resourceID, dataJSON, ip, userAgent)
+		tenantID, adminID, action, resource, resourceID, dataJSON, ip, userAgent); err != nil {
+		log.Warn().Err(err).Str("action", action).Str("resource", resource).Msg("Failed to write audit log")
+	}
 }
 
 func extractIP(r *http.Request) string {
@@ -409,7 +469,7 @@ func (s *Service) CreateOTP(ctx context.Context, email string) (*OTPRecord, erro
 	}
 
 	codeHash, _ := s.HashPassword(code)
-	_, err = s.db.Pool.Exec(ctx,
+	_, err = s.exec(ctx,
 		`INSERT INTO _otp (id, admin_id, code_hash, expires_at, created_at)
 		 VALUES ($1, $2, $3, $4, $5)`,
 		record.ID, record.AdminID, codeHash, record.ExpiresAt, record.CreatedAt)
@@ -424,7 +484,7 @@ func (s *Service) CreateOTP(ctx context.Context, email string) (*OTPRecord, erro
 func (s *Service) VerifyOTP(ctx context.Context, otpID, code string) (*AdminUser, error) {
 	var adminID, codeHash string
 	var expiresAt time.Time
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		`SELECT admin_id, code_hash, expires_at FROM _otp WHERE id = $1`, otpID).
 		Scan(&adminID, &codeHash, &expiresAt)
 	if err != nil {
@@ -432,7 +492,7 @@ func (s *Service) VerifyOTP(ctx context.Context, otpID, code string) (*AdminUser
 	}
 
 	if time.Now().After(expiresAt) {
-		s.db.Pool.Exec(ctx, "DELETE FROM _otp WHERE id = $1", otpID)
+		s.exec(ctx, "DELETE FROM _otp WHERE id = $1", otpID)
 		return nil, fmt.Errorf("OTP expired")
 	}
 
@@ -441,7 +501,7 @@ func (s *Service) VerifyOTP(ctx context.Context, otpID, code string) (*AdminUser
 	}
 
 	// Delete used OTP
-	s.db.Pool.Exec(ctx, "DELETE FROM _otp WHERE id = $1", otpID)
+	s.exec(ctx, "DELETE FROM _otp WHERE id = $1", otpID)
 
 	return s.FindAdminByID(ctx, adminID)
 }
@@ -457,7 +517,7 @@ func (s *Service) CreateMagicLink(ctx context.Context, email string) (string, er
 	tokenHash, _ := s.HashPassword(token)
 	lookupHash := fastHash(token)
 
-	_, err = s.db.Pool.Exec(ctx,
+	_, err = s.exec(ctx,
 		`INSERT INTO _magic_links (id, admin_id, token_hash, lookup_hash, expires_at, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		uuid.New().String(), admin.ID, tokenHash, lookupHash, time.Now().Add(15*time.Minute), time.Now())
@@ -477,7 +537,7 @@ func (s *Service) VerifyMagicLink(ctx context.Context, token string) (*AdminUser
 	// Fast O(1) lookup by indexed lookup_hash column, then bcrypt verify
 	var id, adminID, tokenHash string
 	var expiresAt time.Time
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		`SELECT id, admin_id, token_hash, expires_at
 		 FROM _magic_links
 		 WHERE lookup_hash = $1 AND expires_at > NOW()
@@ -491,7 +551,7 @@ func (s *Service) VerifyMagicLink(ctx context.Context, token string) (*AdminUser
 	}
 
 	// Delete all tokens for this admin (single-use + cleanup)
-	s.db.Pool.Exec(ctx, "DELETE FROM _magic_links WHERE admin_id = $1", adminID)
+	s.exec(ctx, "DELETE FROM _magic_links WHERE admin_id = $1", adminID)
 	return s.FindAdminByID(ctx, adminID)
 }
 
@@ -506,7 +566,7 @@ func (s *Service) CreatePasswordResetToken(ctx context.Context, email string) (s
 	tokenHash, _ := s.HashPassword(token)
 	lookupHash := fastHash(token)
 
-	_, err = s.db.Pool.Exec(ctx,
+	_, err = s.exec(ctx,
 		`INSERT INTO _password_resets (id, admin_id, token_hash, lookup_hash, expires_at, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		uuid.New().String(), admin.ID, tokenHash, lookupHash, time.Now().Add(1*time.Hour), time.Now())
@@ -522,23 +582,29 @@ func (s *Service) ConfirmPasswordReset(ctx context.Context, token, newPassword s
 
 	lookup := fastHash(token)
 
-	var adminID, tokenHash string
-	err := s.db.Pool.QueryRow(ctx,
-		`SELECT admin_id, token_hash FROM _password_resets
-		 WHERE lookup_hash = $1 AND expires_at > NOW()
-		 LIMIT 1`, lookup).Scan(&adminID, &tokenHash)
-	if err != nil {
-		return fmt.Errorf("invalid or expired reset token")
-	}
+	return s.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
+		var adminID, tokenHash string
+		err := s.queryRow(txCtx,
+			`SELECT admin_id, token_hash FROM _password_resets
+			 WHERE lookup_hash = $1 AND expires_at > NOW()
+			 LIMIT 1`, lookup).Scan(&adminID, &tokenHash)
+		if err != nil {
+			return fmt.Errorf("invalid or expired reset token")
+		}
 
-	if !s.VerifyPassword(tokenHash, token) {
-		return fmt.Errorf("invalid reset token")
-	}
+		if !s.VerifyPassword(tokenHash, token) {
+			return fmt.Errorf("invalid reset token")
+		}
 
-	hash, _ := s.HashPassword(newPassword)
-	s.db.Pool.Exec(ctx, "UPDATE _admins SET password_hash = $1 WHERE id = $2", hash, adminID)
-	s.db.Pool.Exec(ctx, "DELETE FROM _password_resets WHERE admin_id = $1", adminID)
-	return nil
+		hash, _ := s.HashPassword(newPassword)
+		if _, err := s.exec(txCtx, "UPDATE _admins SET password_hash = $1 WHERE id = $2", hash, adminID); err != nil {
+			return err
+		}
+		if _, err := s.exec(txCtx, "DELETE FROM _password_resets WHERE admin_id = $1", adminID); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // CreateVerificationToken creates an email verification token with dual-hash.
@@ -552,7 +618,7 @@ func (s *Service) CreateVerificationToken(ctx context.Context, email string) (st
 	tokenHash, _ := s.HashPassword(token)
 	lookupHash := fastHash(token)
 
-	_, err = s.db.Pool.Exec(ctx,
+	_, err = s.exec(ctx,
 		`INSERT INTO _verifications (id, admin_id, token_hash, lookup_hash, expires_at, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		uuid.New().String(), admin.ID, tokenHash, lookupHash, time.Now().Add(24*time.Hour), time.Now())
@@ -568,22 +634,28 @@ func (s *Service) ConfirmVerification(ctx context.Context, token string) error {
 
 	lookup := fastHash(token)
 
-	var adminID, tokenHash string
-	err := s.db.Pool.QueryRow(ctx,
-		`SELECT admin_id, token_hash FROM _verifications
-		 WHERE lookup_hash = $1 AND expires_at > NOW()
-		 LIMIT 1`, lookup).Scan(&adminID, &tokenHash)
-	if err != nil {
-		return fmt.Errorf("invalid or expired verification token")
-	}
+	return s.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
+		var adminID, tokenHash string
+		err := s.queryRow(txCtx,
+			`SELECT admin_id, token_hash FROM _verifications
+			 WHERE lookup_hash = $1 AND expires_at > NOW()
+			 LIMIT 1`, lookup).Scan(&adminID, &tokenHash)
+		if err != nil {
+			return fmt.Errorf("invalid or expired verification token")
+		}
 
-	if !s.VerifyPassword(tokenHash, token) {
-		return fmt.Errorf("invalid verification token")
-	}
+		if !s.VerifyPassword(tokenHash, token) {
+			return fmt.Errorf("invalid verification token")
+		}
 
-	s.db.Pool.Exec(ctx, "UPDATE _admins SET verified = TRUE WHERE id = $1", adminID)
-	s.db.Pool.Exec(ctx, "DELETE FROM _verifications WHERE admin_id = $1", adminID)
-	return nil
+		if _, err := s.exec(txCtx, "UPDATE _admins SET verified = TRUE WHERE id = $1", adminID); err != nil {
+			return err
+		}
+		if _, err := s.exec(txCtx, "DELETE FROM _verifications WHERE admin_id = $1", adminID); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // CreateEmailChangeToken creates an email change confirmation token with dual-hash.
@@ -592,7 +664,7 @@ func (s *Service) CreateEmailChangeToken(ctx context.Context, adminID, newEmail 
 	tokenHash, _ := s.HashPassword(token)
 	lookupHash := fastHash(token)
 
-	_, err := s.db.Pool.Exec(ctx,
+	_, err := s.exec(ctx,
 		`INSERT INTO _email_changes (id, admin_id, new_email, token_hash, lookup_hash, expires_at, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		uuid.New().String(), adminID, newEmail, tokenHash, lookupHash, time.Now().Add(1*time.Hour), time.Now())
@@ -608,22 +680,28 @@ func (s *Service) ConfirmEmailChange(ctx context.Context, token string) error {
 
 	lookup := fastHash(token)
 
-	var adminID, newEmail, tokenHash string
-	err := s.db.Pool.QueryRow(ctx,
-		`SELECT admin_id, new_email, token_hash FROM _email_changes
-		 WHERE lookup_hash = $1 AND expires_at > NOW()
-		 LIMIT 1`, lookup).Scan(&adminID, &newEmail, &tokenHash)
-	if err != nil {
-		return fmt.Errorf("invalid or expired email change token")
-	}
+	return s.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
+		var adminID, newEmail, tokenHash string
+		err := s.queryRow(txCtx,
+			`SELECT admin_id, new_email, token_hash FROM _email_changes
+			 WHERE lookup_hash = $1 AND expires_at > NOW()
+			 LIMIT 1`, lookup).Scan(&adminID, &newEmail, &tokenHash)
+		if err != nil {
+			return fmt.Errorf("invalid or expired email change token")
+		}
 
-	if !s.VerifyPassword(tokenHash, token) {
-		return fmt.Errorf("invalid email change token")
-	}
+		if !s.VerifyPassword(tokenHash, token) {
+			return fmt.Errorf("invalid email change token")
+		}
 
-	s.db.Pool.Exec(ctx, "UPDATE _admins SET email = $1 WHERE id = $2", newEmail, adminID)
-	s.db.Pool.Exec(ctx, "DELETE FROM _email_changes WHERE admin_id = $1", adminID)
-	return nil
+		if _, err := s.exec(txCtx, "UPDATE _admins SET email = $1 WHERE id = $2", newEmail, adminID); err != nil {
+			return err
+		}
+		if _, err := s.exec(txCtx, "DELETE FROM _email_changes WHERE admin_id = $1", adminID); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // generateRandomString creates a random string of the given length.
@@ -637,7 +715,7 @@ func generateRandomString(length int) string {
 func (s *Service) FindOrCreateByOAuth(ctx context.Context, oauthUser *OAuthUserInfo) (*AdminUser, error) {
 	// Try to find by provider + provider_id in external_auths table
 	var adminID string
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		`SELECT admin_id FROM _external_auths WHERE provider = $1 AND provider_id = $2`,
 		oauthUser.Provider, oauthUser.ProviderID).Scan(&adminID)
 
@@ -650,7 +728,7 @@ func (s *Service) FindOrCreateByOAuth(ctx context.Context, oauthUser *OAuthUserI
 		admin, err := s.FindAdminByEmail(ctx, oauthUser.Email)
 		if err == nil {
 			// Link OAuth to existing admin
-			s.db.Pool.Exec(ctx,
+			s.exec(ctx,
 				`INSERT INTO _external_auths (admin_id, provider, provider_id, data) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
 				admin.ID, oauthUser.Provider, oauthUser.ProviderID, string(oauthUser.RawJSON))
 			return admin, nil
@@ -663,6 +741,13 @@ func (s *Service) FindOrCreateByOAuth(ctx context.Context, oauthUser *OAuthUserI
 
 // GenerateAPIKey creates a new API key.
 func (s *Service) GenerateAPIKey(ctx context.Context, adminID, name string, permissions []string) (string, *APIKey, error) {
+	admin, err := s.FindAdminByID(ctx, adminID)
+	if err != nil {
+		return "", nil, fmt.Errorf("api key owner not found: %w", err)
+	}
+
+	permissions = NormalizeAPIKeyPermissions(permissions)
+
 	// Generate a cryptographically random API key
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
@@ -676,24 +761,171 @@ func (s *Service) GenerateAPIKey(ctx context.Context, adminID, name string, perm
 		return "", nil, err
 	}
 
-	prefix := keyStr[:10]
-	apiKey := &APIKey{
-		ID:        uuid.New().String(),
-		AdminID:   adminID,
-		Name:      name,
-		KeyHash:   hashed,
-		Prefix:    prefix,
+	permissionsJSON, err := json.Marshal(permissions)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to encode api key permissions: %w", err)
 	}
 
-	_, err = s.db.Pool.Exec(ctx, `
-		INSERT INTO _api_keys (id, admin_id, name, key_hash, prefix)
-		VALUES ($1, $2, $3, $4, $5)`,
-		apiKey.ID, apiKey.AdminID, apiKey.Name, apiKey.KeyHash, apiKey.Prefix)
+	now := time.Now().UTC()
+	prefix := keyStr[:10]
+	apiKey := &APIKey{
+		ID:          uuid.New().String(),
+		TenantID:    admin.TenantID,
+		AdminID:     adminID,
+		Name:        name,
+		KeyHash:     hashed,
+		Prefix:      prefix,
+		Permissions: permissions,
+		CreatedAt:   now,
+	}
+
+	_, err = s.exec(ctx, `
+		INSERT INTO _api_keys (id, tenant_id, admin_id, name, key_hash, prefix, permissions, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)`,
+		apiKey.ID, apiKey.TenantID, apiKey.AdminID, apiKey.Name, apiKey.KeyHash, apiKey.Prefix, permissionsJSON, now)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create API key: %w", err)
 	}
 
 	return keyStr, apiKey, nil
+}
+
+// NormalizeAPIKeyPermissions normalizes, deduplicates and sorts API key scopes.
+func NormalizeAPIKeyPermissions(permissions []string) []string {
+	if len(permissions) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(permissions))
+	result := make([]string, 0, len(permissions))
+	for _, permission := range permissions {
+		permission = normalizeAPIKeyPermission(permission)
+		if permission == "" {
+			continue
+		}
+		if _, ok := seen[permission]; ok {
+			continue
+		}
+		seen[permission] = struct{}{}
+		result = append(result, permission)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// APIKeyPermissionAllowed reports whether the granted permission set allows the
+// required permission. Empty granted permissions mean unrestricted owner-role access.
+func APIKeyPermissionAllowed(granted []string, required string) bool {
+	required = normalizeAPIKeyPermission(required)
+	if required == "" {
+		return true
+	}
+
+	granted = NormalizeAPIKeyPermissions(granted)
+	if len(granted) == 0 {
+		return true
+	}
+
+	for _, permission := range granted {
+		switch {
+		case permission == "*", permission == required:
+			return true
+		case strings.HasSuffix(permission, ".*"):
+			prefix := strings.TrimSuffix(permission, ".*")
+			if prefix != "" && (required == prefix || strings.HasPrefix(required, prefix+".")) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func normalizeAPIKeyPermission(permission string) string {
+	permission = strings.ToLower(strings.TrimSpace(permission))
+	permission = strings.Trim(permission, ".")
+	if permission == "all" {
+		return "*"
+	}
+	return permission
+}
+
+// ValidateAPIKey validates an API key and returns both the key metadata and its owning admin.
+func (s *Service) ValidateAPIKey(ctx context.Context, token string) (*APIKey, *AdminUser, error) {
+	if s == nil || s.db == nil {
+		return nil, nil, fmt.Errorf("auth service not initialized")
+	}
+
+	token = strings.TrimSpace(token)
+	if token == "" || !strings.HasPrefix(token, "gb_") {
+		return nil, nil, fmt.Errorf("invalid api key")
+	}
+
+	prefix := token
+	if len(prefix) > 10 {
+		prefix = prefix[:10]
+	}
+
+	rows, err := s.query(ctx, `
+		SELECT id, tenant_id, admin_id, name, key_hash, prefix, permissions, last_used_at, expires_at, created_at
+		FROM _api_keys
+		WHERE prefix = $1`, prefix)
+	if err != nil {
+		return nil, nil, fmt.Errorf("api key lookup failed: %w", err)
+	}
+	defer rows.Close()
+
+	now := time.Now().UTC()
+	for rows.Next() {
+		apiKey := &APIKey{}
+		var tenantID stdsql.NullString
+		var permissionsJSON []byte
+		var lastUsedAt stdsql.NullTime
+		var expiresAt stdsql.NullTime
+		if err := rows.Scan(&apiKey.ID, &tenantID, &apiKey.AdminID, &apiKey.Name, &apiKey.KeyHash, &apiKey.Prefix, &permissionsJSON, &lastUsedAt, &expiresAt, &apiKey.CreatedAt); err != nil {
+			continue
+		}
+		apiKey.TenantID = tenantID.String
+		apiKey.Permissions = decodeAPIKeyPermissions(permissionsJSON)
+		if expiresAt.Valid {
+			expiresAtValue := expiresAt.Time.UTC()
+			apiKey.ExpiresAt = &expiresAtValue
+			if now.After(expiresAtValue) {
+				continue
+			}
+		}
+		if lastUsedAt.Valid {
+			lastUsedAtValue := lastUsedAt.Time.UTC()
+			apiKey.LastUsedAt = &lastUsedAtValue
+		}
+		if !s.VerifyPassword(apiKey.KeyHash, token) {
+			continue
+		}
+
+		admin, err := s.FindAdminByID(ctx, apiKey.AdminID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("api key owner not found: %w", err)
+		}
+		if apiKey.TenantID == "" {
+			apiKey.TenantID = admin.TenantID
+		}
+		_, _ = s.exec(ctx, `UPDATE _api_keys SET last_used_at = $2, updated_at = $2 WHERE id = $1`, apiKey.ID, now)
+		apiKey.LastUsedAt = &now
+		return apiKey, admin, nil
+	}
+
+	return nil, nil, fmt.Errorf("invalid api key")
+}
+
+func decodeAPIKeyPermissions(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var permissions []string
+	if err := json.Unmarshal(raw, &permissions); err != nil {
+		return nil
+	}
+	return NormalizeAPIKeyPermissions(permissions)
 }
 
 // ----------- Password utilities (constant time) -----------
@@ -726,6 +958,7 @@ type AdminUser struct {
 	PasswordHash string    `json:"-"`
 	Avatar       string    `json:"avatar"`
 	Role         string    `json:"role"`
+	Verified     bool      `json:"verified"`
 	LastLoginAt  time.Time `json:"last_login_at"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -733,12 +966,16 @@ type AdminUser struct {
 
 // APIKey represents an API key.
 type APIKey struct {
-	ID        string    `json:"id"`
-	AdminID   string    `json:"admin_id"`
-	Name      string    `json:"name"`
-	KeyHash   string    `json:"-"`
-	Prefix    string    `json:"prefix"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string     `json:"id"`
+	TenantID    string     `json:"tenant_id,omitempty"`
+	AdminID     string     `json:"admin_id"`
+	Name        string     `json:"name"`
+	KeyHash     string     `json:"-"`
+	Prefix      string     `json:"prefix"`
+	Permissions []string   `json:"permissions,omitempty"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 // OTPRecord represents a one-time password.
@@ -756,18 +993,18 @@ type OTPRecord struct {
 
 // InvalidateAllTokens removes all active tokens for an admin (magic links, OTPs, resets, etc.)
 func (s *Service) InvalidateAllTokens(ctx context.Context, adminID string) {
-	s.db.Pool.Exec(ctx, "DELETE FROM _magic_links WHERE admin_id = $1", adminID)
-	s.db.Pool.Exec(ctx, "DELETE FROM _otp WHERE admin_id = $1", adminID)
-	s.db.Pool.Exec(ctx, "DELETE FROM _password_resets WHERE admin_id = $1", adminID)
-	s.db.Pool.Exec(ctx, "DELETE FROM _verifications WHERE admin_id = $1", adminID)
-	s.db.Pool.Exec(ctx, "DELETE FROM _email_changes WHERE admin_id = $1", adminID)
+	s.exec(ctx, "DELETE FROM _magic_links WHERE admin_id = $1", adminID)
+	s.exec(ctx, "DELETE FROM _otp WHERE admin_id = $1", adminID)
+	s.exec(ctx, "DELETE FROM _password_resets WHERE admin_id = $1", adminID)
+	s.exec(ctx, "DELETE FROM _verifications WHERE admin_id = $1", adminID)
+	s.exec(ctx, "DELETE FROM _email_changes WHERE admin_id = $1", adminID)
 }
 
 // RateLimitAuthRequest checks if a request exceeds rate limits for auth endpoints.
 // Returns nil if allowed, error if rate limited.
 func (s *Service) RateLimitAuthRequest(ctx context.Context, action, identifier string, maxPerWindow int, window time.Duration) error {
 	var count int
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		`SELECT COUNT(*) FROM _rate_limits
 		 WHERE key = $1 AND window_start > $2`,
 		"auth:"+action+":"+identifier, time.Now().Add(-window)).Scan(&count)
@@ -780,7 +1017,7 @@ func (s *Service) RateLimitAuthRequest(ctx context.Context, action, identifier s
 	}
 
 	// Record this attempt
-	s.db.Pool.Exec(ctx,
+	s.exec(ctx,
 		`INSERT INTO _rate_limits (key, hits, window_start) VALUES ($1, 1, NOW())`,
 		"auth:"+action+":"+identifier)
 

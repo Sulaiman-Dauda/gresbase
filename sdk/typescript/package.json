@@ -1,38 +1,50 @@
 {
   "name": "gresbase-sdk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Isomorphic TypeScript SDK for Gresbase — authentication, CRUD, realtime, file upload",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
     }
   },
   "files": [
     "dist",
     "README.md"
   ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "build": "tsc",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node scripts/finalize-esm.mjs",
     "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
     "gresbase",
     "backend",
-    "sdk",
-    "authentication",
+    "baas",
+    "pocketbase-alternative",
+    "postgres",
     "realtime",
-    "pocketbase"
+    "sdk",
+    "authentication"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gresbase/gresbase"
+    "url": "git+https://github.com/gresbase/gresbase.git",
+    "directory": "sdk/typescript"
+  },
+  "homepage": "https://github.com/gresbase/gresbase#readme",
+  "bugs": {
+    "url": "https://github.com/gresbase/gresbase/issues"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

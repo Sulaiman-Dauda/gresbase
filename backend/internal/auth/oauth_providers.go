@@ -90,7 +90,7 @@ func NewGoogleProvider(clientID, clientSecret string) *GoogleProvider {
 	}
 }
 
-func (p *GoogleProvider) Name() string { return "google" }
+func (p *GoogleProvider) Name() string    { return "google" }
 func (p *GoogleProvider) IsEnabled() bool { return p.enabled }
 
 func (p *GoogleProvider) GetAuthURL(state, redirectURL string) (string, error) {
@@ -165,11 +165,11 @@ func (p *GoogleProvider) fetchUserInfo(ctx context.Context, accessToken string) 
 
 	body, _ := io.ReadAll(resp.Body)
 	var googleUser struct {
-		ID      string `json:"id"`
-		Email   string `json:"email"`
-		Name    string `json:"name"`
-		Picture string `json:"picture"`
-		Verified bool  `json:"verified_email"`
+		ID       string `json:"id"`
+		Email    string `json:"email"`
+		Name     string `json:"name"`
+		Picture  string `json:"picture"`
+		Verified bool   `json:"verified_email"`
 	}
 	if err := json.Unmarshal(body, &googleUser); err != nil {
 		return nil, fmt.Errorf("failed to parse user info: %w", err)
@@ -209,7 +209,7 @@ func NewGithubProvider(clientID, clientSecret string) *GithubProvider {
 	}
 }
 
-func (p *GithubProvider) Name() string { return "github" }
+func (p *GithubProvider) Name() string    { return "github" }
 func (p *GithubProvider) IsEnabled() bool { return p.enabled }
 
 func (p *GithubProvider) GetAuthURL(state, redirectURL string) (string, error) {
@@ -370,7 +370,7 @@ func NewMicrosoftProvider(clientID, clientSecret, tenant string) *MicrosoftProvi
 	}
 }
 
-func (p *MicrosoftProvider) Name() string { return "microsoft" }
+func (p *MicrosoftProvider) Name() string    { return "microsoft" }
 func (p *MicrosoftProvider) IsEnabled() bool { return p.enabled }
 
 func (p *MicrosoftProvider) GetAuthURL(state, redirectURL string) (string, error) {
@@ -492,7 +492,7 @@ func NewGitlabProvider(clientID, clientSecret, baseURL string) *GitlabProvider {
 	}
 }
 
-func (p *GitlabProvider) Name() string { return "gitlab" }
+func (p *GitlabProvider) Name() string    { return "gitlab" }
 func (p *GitlabProvider) IsEnabled() bool { return p.enabled }
 
 func (p *GitlabProvider) GetAuthURL(state, redirectURL string) (string, error) {
@@ -594,7 +594,7 @@ func NewDiscordProvider(clientID, clientSecret string) *DiscordProvider {
 	}
 }
 
-func (p *DiscordProvider) Name() string { return "discord" }
+func (p *DiscordProvider) Name() string    { return "discord" }
 func (p *DiscordProvider) IsEnabled() bool { return p.enabled }
 
 func (p *DiscordProvider) GetAuthURL(state, redirectURL string) (string, error) {
@@ -700,7 +700,11 @@ func BuildOAuthRegistry(db *database.DB, providers map[string]struct {
 		case "discord":
 			reg.Register(NewDiscordProvider(p.ClientID, p.ClientSecret))
 		default:
-			log.Warn().Str("provider", name).Msg("Unknown OAuth provider, skipping")
+			if sp, ok := NewStandardProvider(name, p.ClientID, p.ClientSecret); ok {
+				reg.Register(sp)
+			} else {
+				log.Warn().Str("provider", name).Msg("Unknown OAuth provider, skipping")
+			}
 		}
 	}
 

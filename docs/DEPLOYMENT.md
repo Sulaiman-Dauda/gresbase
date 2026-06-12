@@ -15,6 +15,7 @@ This guide covers deploying Gresbase in production across multiple platforms.
 - [TLS Configuration](#tls-configuration)
 - [Backup & Restore](#backup--restore)
 - [Monitoring](#monitoring)
+- [Read Replicas](#read-replicas)
 - [Scaling Considerations](#scaling-considerations)
 
 ## Prerequisites
@@ -37,7 +38,14 @@ chmod +x /usr/local/bin/gresbase
 # 2. Set environment variables
 export DATABASE_URL="postgres://user:password@localhost:5432/gresbase?sslmode=disable"
 export JWT_SECRET="$(openssl rand -hex 32)"
+export CORS_ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
 export ADDR=":8080"
+# Optional performance knobs for PostgreSQL-backed production instances
+export DATABASE_MAX_OPEN_CONNS="25"
+export DATABASE_MAX_IDLE_CONNS="5"
+export DATABASE_MAX_IDLE_TIME="5m"
+export REALTIME_MAX_CONNECTIONS="10000"
+export REALTIME_MAX_MESSAGE_SIZE="65536"
 
 # 3. Run migrations
 gresbase migrate
@@ -112,6 +120,7 @@ docker compose up -d
 ```
 
 This starts:
+
 - **gresbase**: The Gresbase server on port 8080
 - **db**: PostgreSQL 16 on port 5432
 
@@ -123,6 +132,13 @@ Edit `docker/gresbase.example.yaml`:
 addr: ":8080"
 database_url: "postgres://gresbase:${DB_PASSWORD}@db:5432/gresbase?sslmode=disable"
 jwt_secret: "${JWT_SECRET}"
+cors_allowed_origins:
+  - "https://app.example.com"
+  - "https://admin.example.com"
+cors_allow_credentials: true
+database_max_open_conns: 25
+database_max_idle_conns: 5
+database_max_idle_time: 5m
 storage_backend: "s3"
 storage_local_path: "/app/storage"
 log_level: "info"
@@ -304,6 +320,9 @@ kill_timeout = 5
 3. Set environment variables:
    - `DATABASE_URL`: Use the Railway PostgreSQL connection string
    - `JWT_SECRET`: Generate a random secret
+
+- `CORS_ALLOWED_ORIGINS`: Set your public dashboard/API origins
+
 4. Deploy — Railway auto-detects the Dockerfile
 
 ---
@@ -407,31 +426,59 @@ gresbase serve 2>&1 | tee gresbase.log
 
 ---
 
+## Read Replicas
+
+Set `DATABASE_REPLICA_URL` alongside an external `DATABASE_URL` to route replica-safe reads — record lists, aggregations, and relation expansion — to a PostgreSQL read replica:
+
+```bash
+export DATABASE_URL="postgres://gresbase:password@primary:5432/gresbase"
+export DATABASE_REPLICA_URL="postgres://gresbase:password@replica:5432/gresbase"
+```
+
+- **Writes, transactions, and rule-feeding reads stay on the primary.** Only read paths that tolerate replica lag are routed.
+- **Failure degrades gracefully**: if the replica is unreachable at boot, Gresbase logs a warning and serves all reads from the primary instead of failing to start.
+- **Ignored in embedded PostgreSQL mode** — the setting only applies with an external database.
+- **Expect replication lag** on routed reads: a record written a moment ago may briefly be missing from a list served by a lagging replica.
+
+The replica pool reuses the `DATABASE_MAX_OPEN_CONNS` / `DATABASE_MAX_IDLE_CONNS` / `DATABASE_MAX_IDLE_TIME` settings.
+
+---
+
 ## Scaling Considerations
 
-- **Gresbase is single-node.** The embedded PostgreSQL data directory is not designed for multi-node setups.
-- **External PostgreSQL is required** for any multi-node scaling.
-- **Realtime connections** are in-memory on a single instance. For horizontal scaling of realtime, use a separate set of stateless nodes with a shared message broker (NATS/Redis) — on the roadmap.
+- **External PostgreSQL is required** for any multi-node scaling. The embedded PostgreSQL data directory is single-node only.
+- **Reads scale with replicas** — see [Read Replicas](#read-replicas).
+- **Realtime scales across nodes** with `REALTIME_MULTI_NODE=true`: record events and broadcasts fan out over PostgreSQL LISTEN/NOTIFY, no message broker needed. See the [features guide](FEATURES.md#scaling-out-multi-node-realtime-with-listennotify). Presence member lists are node-local.
 - **File storage** should use S3 for multi-node deployments so all nodes can access files.
 
 ---
 
 ## Environment Variables Reference
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
-| `JWT_SECRET` | Yes | — | HS256 signing key (min 32 chars) |
-| `ADDR` | No | `:8080` | Listen address |
-| `STORAGE_BACKEND` | No | `local` | `local` or `s3` |
-| `STORAGE_LOCAL_PATH` | No | `./storage` | Local file storage path |
-| `S3_ENDPOINT` | No | — | S3-compatible endpoint |
-| `S3_ACCESS_KEY` | No | — | S3 access key |
-| `S3_SECRET_KEY` | No | — | S3 secret key |
-| `S3_BUCKET` | No | — | S3 bucket name |
-| `S3_REGION` | No | `us-east-1` | S3 region |
-| `LOG_LEVEL` | No | `info` | `debug`, `info`, `warn`, `error` |
-| `DEV_MODE` | No | `false` | Enable development mode |
+| Variable                 | Required | Default     | Description                                       |
+| ------------------------ | -------- | ----------- | ------------------------------------------------- |
+| `DATABASE_URL`           | Yes      | —           | PostgreSQL connection string                      |
+| `DATABASE_REPLICA_URL`   | No       | —           | Read replica for lists/aggregations/expansion     |
+| `JWT_SECRET`             | HS256    | —           | HS256 signing key (min 32 chars)                  |
+| `JWT_ALGORITHM`          | No       | `HS256`     | `HS256` or `ES256`                                |
+| `JWT_KEY_ID`             | No       | —           | `kid` header and JWKS key id                      |
+| `JWT_PRIVATE_KEY`        | ES256    | —           | PEM-encoded ECDSA P-256 private key               |
+| `JWT_PUBLIC_KEY`         | No       | —           | PEM-encoded ECDSA P-256 public key for JWKS       |
+| `CORS_ALLOWED_ORIGINS`   | Prod     | `*`         | Comma-separated trusted browser origins           |
+| `CORS_ALLOW_CREDENTIALS` | No       | `true`      | Whether credentialed browser requests are allowed |
+| `ADDR`                   | No       | `:8080`     | Listen address                                    |
+| `STORAGE_BACKEND`        | No       | `local`     | `local` or `s3`                                   |
+| `STORAGE_LOCAL_PATH`     | No       | `./storage` | Local file storage path                           |
+| `S3_ENDPOINT`            | No       | —           | S3-compatible endpoint                            |
+| `S3_ACCESS_KEY`          | No       | —           | S3 access key                                     |
+| `S3_SECRET_KEY`          | No       | —           | S3 secret key                                     |
+| `S3_BUCKET`              | No       | —           | S3 bucket name                                    |
+| `S3_REGION`              | No       | `us-east-1` | S3 region                                         |
+| `HOOKS_DIR`              | No       | `./gb_hooks`| Directory of `*.js` file hooks (`""` disables)    |
+| `HOOKS_WATCH`            | No       | `true`      | Hot-reload the hooks directory on change          |
+| `REALTIME_MULTI_NODE`    | No       | `false`     | Cross-node realtime via LISTEN/NOTIFY             |
+| `LOG_LEVEL`              | No       | `info`      | `debug`, `info`, `warn`, `error`                  |
+| `DEV_MODE`               | No       | `false`     | Enable development mode                           |
 
 ---
 
@@ -447,6 +494,7 @@ gresbase serve 2>&1 | tee gresbase.log
 ### "JWT verification failed"
 
 - Ensure `JWT_SECRET` is consistent across restarts
+- For ES256, ensure `JWT_PRIVATE_KEY` is stable and fetch public keys from `/.well-known/jwks.json`
 - Check token expiry (default: 15 minutes for access, 7 days for refresh)
 
 ### "File upload fails"

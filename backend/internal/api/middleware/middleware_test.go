@@ -187,6 +187,52 @@ func TestRateLimitByIPMiddleware(t *testing.T) {
 	}
 }
 
+func TestTimeoutExceptSkipsLongLivedRequests(t *testing.T) {
+	mw := TimeoutExcept(10*time.Millisecond, IsLongLivedRequest)
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, hasDeadline := r.Context().Deadline()
+		writeCode := http.StatusNoContent
+		if hasDeadline {
+			writeCode = http.StatusAccepted
+		}
+		w.WriteHeader(writeCode)
+	}))
+
+	sseReq := httptest.NewRequest(http.MethodGet, "/api/v1/sse", nil)
+	sseRec := httptest.NewRecorder()
+	h.ServeHTTP(sseRec, sseReq)
+	if sseRec.Code != http.StatusNoContent {
+		t.Fatalf("expected long-lived SSE route to skip timeout deadline, got %d", sseRec.Code)
+	}
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	healthRec := httptest.NewRecorder()
+	h.ServeHTTP(healthRec, healthReq)
+	if healthRec.Code != http.StatusAccepted {
+		t.Fatalf("expected regular route to carry timeout deadline, got %d", healthRec.Code)
+	}
+}
+
+func TestIsLongLivedRequest(t *testing.T) {
+	tests := []struct {
+		method string
+		path   string
+		want   bool
+	}{
+		{http.MethodGet, "/api/v1/realtime", true},
+		{http.MethodGet, "/api/v1/sse", true},
+		{http.MethodPost, "/api/v1/realtime", false},
+		{http.MethodGet, "/api/v1/health", false},
+	}
+
+	for _, tt := range tests {
+		req := httptest.NewRequest(tt.method, tt.path, nil)
+		if got := IsLongLivedRequest(req); got != tt.want {
+			t.Fatalf("IsLongLivedRequest(%s %s) = %v, want %v", tt.method, tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestAuthRateLimiter(t *testing.T) {
 	rl := NewAuthRateLimiter()
 

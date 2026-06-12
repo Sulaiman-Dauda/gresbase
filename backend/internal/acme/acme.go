@@ -88,7 +88,7 @@ func (s *Service) CreateAccount(ctx context.Context, contact []string, termsAgre
 
 	// Store in database
 	contactJSON, _ := json.Marshal(contact)
-	_, err = s.db.Pool.Exec(ctx, `
+	err = s.db.Exec(ctx, `
 		INSERT INTO _acme_accounts (id, contact, terms_agreed, status, created_at)
 		VALUES ($1, $2, $3, $4, $5)`,
 		account.ID, contactJSON, termsAgreed, account.Status, account.CreatedAt)
@@ -290,19 +290,19 @@ func (s *Service) FinalizeOrder(ctx context.Context, orderID string, csrDER []by
 
 	// Store certificate
 	cert := &Certificate{
-		ID:         uuid.New().String(),
-		Domain:     domains[0],
-		Raw:        fullChain,
-		NotBefore:  time.Now(),
-		NotAfter:   time.Now().Add(90 * 24 * time.Hour), // 90-day validity
-		Issuer:     "Gresbase Internal CA",
-		AutoRenew:  true,
+		ID:            uuid.New().String(),
+		Domain:        domains[0],
+		Raw:           fullChain,
+		NotBefore:     time.Now(),
+		NotAfter:      time.Now().Add(90 * 24 * time.Hour), // 90-day validity
+		Issuer:        "Gresbase Internal CA",
+		AutoRenew:     true,
 		ChallengeType: "http-01",
-		Status:     "active",
-		CreatedAt:  time.Now(),
+		Status:        "active",
+		CreatedAt:     time.Now(),
 	}
 
-	_, err = s.db.Pool.Exec(ctx, `
+	err = s.db.Exec(ctx, `
 		INSERT INTO _certificates (id, domain, certificate, issuer, not_before, not_after,
 			auto_renew, challenge_type, status)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -324,7 +324,7 @@ func (s *Service) FinalizeOrder(ctx context.Context, orderID string, csrDER []by
 // GetCertificate retrieves a certificate by its order.
 func (s *Service) GetCertificate(ctx context.Context, certID string) (*Certificate, error) {
 	cert := &Certificate{}
-	err := s.db.Pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT id, domain, certificate, private_key, issuer,
 			not_before, not_after, auto_renew, challenge_type, status, created_at
 		FROM _certificates WHERE id = $1`, certID).Scan(
@@ -339,7 +339,7 @@ func (s *Service) GetCertificate(ctx context.Context, certID string) (*Certifica
 
 // RevokeCertificate revokes an issued certificate.
 func (s *Service) RevokeCertificate(ctx context.Context, certID string) error {
-	_, err := s.db.Pool.Exec(ctx,
+	err := s.db.Exec(ctx,
 		"UPDATE _certificates SET status = 'revoked', updated_at = NOW() WHERE id = $1", certID)
 	if err != nil {
 		return err
@@ -351,7 +351,7 @@ func (s *Service) RevokeCertificate(ctx context.Context, certID string) error {
 
 // ListCertificates lists all managed certificates.
 func (s *Service) ListCertificates(ctx context.Context, tenantID string) ([]*Certificate, error) {
-	rows, err := s.db.Pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id, domain, certificate, issuer, not_before, not_after,
 			auto_renew, challenge_type, status, created_at
 		FROM _certificates
@@ -423,7 +423,7 @@ func (s *Service) IssueForDomain(ctx context.Context, domain string) (*Certifica
 		Bytes: privateKeyDER,
 	}))
 
-	_, err = s.db.Pool.Exec(ctx,
+	err = s.db.Exec(ctx,
 		"UPDATE _certificates SET private_key = $1 WHERE id = $2",
 		cert.PrivateKey, cert.ID)
 
@@ -444,8 +444,10 @@ func (s *Service) RenewCertificate(ctx context.Context, certID string) (*Certifi
 	}
 
 	// Mark old as replaced
-	s.db.Pool.Exec(ctx,
-		"UPDATE _certificates SET status = 'replaced' WHERE id = $1", certID)
+	if err := s.db.Exec(ctx,
+		"UPDATE _certificates SET status = 'replaced' WHERE id = $1", certID); err != nil {
+		return nil, err
+	}
 
 	log.Info().Str("domain", existing.Domain).Msg("Certificate renewed")
 
@@ -454,7 +456,7 @@ func (s *Service) RenewCertificate(ctx context.Context, certID string) (*Certifi
 
 // AutoRenew checks all certificates and renews those expiring soon.
 func (s *Service) AutoRenew(ctx context.Context) error {
-	rows, err := s.db.Pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id, domain, not_after FROM _certificates
 		WHERE status = 'active' AND auto_renew = TRUE
 		AND not_after < NOW() + INTERVAL '30 days'`)
@@ -493,7 +495,7 @@ func (s *Service) GetTLSConfig(ctx context.Context) (*tls.Config, error) {
 		GetCertificate: func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			// Look up certificate by domain
 			var raw string
-			err := s.db.Pool.QueryRow(ctx, `
+			err := s.db.QueryRow(ctx, `
 				SELECT certificate FROM _certificates
 				WHERE domain = $1 AND status = 'active'
 				ORDER BY created_at DESC LIMIT 1`, info.ServerName).Scan(&raw)
@@ -518,11 +520,11 @@ func (s *Service) GetTLSConfig(ctx context.Context) (*tls.Config, error) {
 
 // CertificateAuthority is an internal CA for issuing certificates.
 type CertificateAuthority struct {
-	cert       *x509.Certificate
-	key        crypto.PrivateKey
-	caCertPEM  []byte
-	serial     *big.Int
-	mu         sync.Mutex
+	cert      *x509.Certificate
+	key       crypto.PrivateKey
+	caCertPEM []byte
+	serial    *big.Int
+	mu        sync.Mutex
 }
 
 // NewCertificateAuthority creates a new internal CA.
@@ -619,24 +621,24 @@ func (ca *CertificateAuthority) CAPEM() []byte {
 
 // Account represents an ACME account.
 type Account struct {
-	ID          string           `json:"id"`
-	Contact     []string         `json:"contact"`
-	TermsAgreed bool             `json:"terms_agreed"`
-	Status      string           `json:"status"`
+	ID          string            `json:"id"`
+	Contact     []string          `json:"contact"`
+	TermsAgreed bool              `json:"terms_agreed"`
+	Status      string            `json:"status"`
 	PrivateKey  *ecdsa.PrivateKey `json:"-"`
 	PublicKey   *ecdsa.PublicKey  `json:"-"`
-	CreatedAt   time.Time        `json:"created_at"`
+	CreatedAt   time.Time         `json:"created_at"`
 }
 
 // Order represents an ACME certificate order.
 type Order struct {
-	ID            string        `json:"id"`
-	Identifiers   []Identifier  `json:"identifiers"`
-	Status        string        `json:"status"`
-	ExpiresAt     time.Time     `json:"expires_at"`
-	Challenges    []*Challenge  `json:"challenges"`
-	CertificateID string        `json:"certificate_id,omitempty"`
-	CreatedAt     time.Time     `json:"created_at"`
+	ID            string       `json:"id"`
+	Identifiers   []Identifier `json:"identifiers"`
+	Status        string       `json:"status"`
+	ExpiresAt     time.Time    `json:"expires_at"`
+	Challenges    []*Challenge `json:"challenges"`
+	CertificateID string       `json:"certificate_id,omitempty"`
+	CreatedAt     time.Time    `json:"created_at"`
 }
 
 // Identifier represents a domain identifier in an ACME order.
@@ -735,9 +737,9 @@ func (s *Service) IssueForDomainDNS(ctx context.Context, domain string, dnsProvi
 		// Manual mode: store challenge for manual verification
 		dnsMu.Lock()
 		dnsChallenges[challenge.Token] = &dnsChallenge{
-			Domain:  domain,
-			Token:   challenge.Token,
-			KeyAuth: keyAuth,
+			Domain:   domain,
+			Token:    challenge.Token,
+			KeyAuth:  keyAuth,
 			Deadline: time.Now().Add(1 * time.Hour),
 		}
 		dnsMu.Unlock()
@@ -781,8 +783,10 @@ func (s *Service) IssueForDomainDNS(ctx context.Context, domain string, dnsProvi
 	}))
 	cert.ChallengeType = "dns-01"
 
-	s.db.Pool.Exec(ctx, "UPDATE _certificates SET private_key = $1, challenge_type = $2 WHERE id = $3",
-		cert.PrivateKey, cert.ChallengeType, cert.ID)
+	if err := s.db.Exec(ctx, "UPDATE _certificates SET private_key = $1, challenge_type = $2 WHERE id = $3",
+		cert.PrivateKey, cert.ChallengeType, cert.ID); err != nil {
+		return nil, err
+	}
 
 	return cert, nil
 }
@@ -860,11 +864,11 @@ func (s *Service) DNSChallengeInfo(domain, token string) map[string]string {
 	txtValue := base64.RawURLEncoding.EncodeToString(sha256Hash([]byte(keyAuth)))
 
 	return map[string]string{
-		"record_type": "TXT",
-		"record_name": fmt.Sprintf("_acme-challenge.%s", domain),
-		"record_value": txtValue,
+		"record_type":       "TXT",
+		"record_name":       fmt.Sprintf("_acme-challenge.%s", domain),
+		"record_value":      txtValue,
 		"key_authorization": keyAuth,
-		"token": token,
+		"token":             token,
 		"instructions": fmt.Sprintf(
 			"Create a TXT record at _acme-challenge.%s with value: %s",
 			domain, txtValue,

@@ -24,9 +24,9 @@ func TestAllMigrations(t *testing.T) {
 		}
 	}
 
-	// Verify migration count (should be 4)
-	if len(migrations) != 4 {
-		t.Errorf("expected 4 migrations, got %d", len(migrations))
+	// Verify migration count
+	if len(migrations) != 7 {
+		t.Errorf("expected 7 migrations, got %d", len(migrations))
 	}
 }
 
@@ -99,6 +99,45 @@ func TestMigration004Content(t *testing.T) {
 	for _, table := range expectedTables {
 		if !containsSQL(Migration004.Up, "CREATE TABLE IF NOT EXISTS "+table) {
 			t.Errorf("Migration004 missing table: %s", table)
+		}
+	}
+}
+
+func TestMigration005Content(t *testing.T) {
+	if Migration005.Name != "1749300001_admin_verified_record_lookup_hashes" {
+		t.Errorf("unexpected name: %s", Migration005.Name)
+	}
+
+	expectedStatements := []string{
+		"ALTER TABLE _admins ADD COLUMN IF NOT EXISTS verified",
+		"ALTER TABLE _record_password_resets ADD COLUMN IF NOT EXISTS lookup_hash",
+		"ALTER TABLE _record_verifications ADD COLUMN IF NOT EXISTS lookup_hash",
+		"ALTER TABLE _record_email_changes ADD COLUMN IF NOT EXISTS lookup_hash",
+	}
+	for _, stmt := range expectedStatements {
+		if !containsSQL(Migration005.Up, stmt) {
+			t.Errorf("Migration005 missing statement: %s", stmt)
+		}
+	}
+}
+
+func TestMigration007Content(t *testing.T) {
+	if Migration007.Name != "1749500000_passkeys" {
+		t.Errorf("unexpected name: %s", Migration007.Name)
+	}
+
+	expectedTables := []string{"_record_passkeys", "_webauthn_sessions"}
+	for _, table := range expectedTables {
+		if !containsSQL(Migration007.Up, "CREATE TABLE IF NOT EXISTS "+table) {
+			t.Errorf("Migration007 missing table: %s", table)
+		}
+	}
+
+	// Owner index + credential id lookup for discoverable logins.
+	expectedIndexes := []string{"idx_record_passkeys_owner", "idx_record_passkeys_credential", "idx_webauthn_sessions_expires"}
+	for _, index := range expectedIndexes {
+		if !containsSQL(Migration007.Up, index) {
+			t.Errorf("Migration007 missing index: %s", index)
 		}
 	}
 }

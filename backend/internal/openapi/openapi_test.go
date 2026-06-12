@@ -19,13 +19,13 @@ func TestGenerate_Basic(t *testing.T) {
 			ResponseSchema: &Schema{Type: "object"},
 		},
 		{
-			Method:         "POST",
-			Pattern:        "/api/v1/auth/login",
-			Summary:        "Admin login",
-			OperationID:    "postAuthLogin",
-			Tag:            "Auth",
-			AuthRequired:   true,
-			RequestSchema:  &Schema{Type: "object", Properties: map[string]*Schema{
+			Method:       "POST",
+			Pattern:      "/api/v1/auth/login",
+			Summary:      "Admin login",
+			OperationID:  "postAuthLogin",
+			Tag:          "Auth",
+			AuthRequired: true,
+			RequestSchema: &Schema{Type: "object", Properties: map[string]*Schema{
 				"email":    {Type: "string", Format: "email"},
 				"password": {Type: "string", Format: "password"},
 			}},

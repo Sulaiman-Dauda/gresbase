@@ -4,26 +4,40 @@
 //  1. A standalone server:   ./gresbase serve
 //  2. A Go library/framework: import "github.com/gresbase/gresbase"
 //
-// Example usage as a Go library:
+// Example usage as a Go library (see examples/embed for a runnable version):
 //
 //	package main
 //
 //	import (
 //	    "log"
+//	    "net/http"
+//
 //	    "github.com/gresbase/gresbase"
+//	    "github.com/gresbase/gresbase/internal/events"
 //	)
 //
 //	func main() {
-//	    app := gresbase.New()
+//	    gb := gresbase.New()
 //
-//	    app.OnServe().BindFunc(func(se *gresbase.ServeEvent) error {
-//	        se.Router.GET("/hello", func(w http.ResponseWriter, r *http.Request) {
-//	            w.Write([]byte("Hello from custom route!"))
-//	        })
-//	        return se.Next()
+//	    // Real Go hooks — registered before Start(), bound to the live event bus.
+//	    gb.OnRecordCreate().BindFunc(func(e events.Event) error {
+//	        if re, ok := e.(*events.RecordEvent); ok {
+//	            log.Printf("record created in %s: %v", re.CollectionName, re.RecordID)
+//	        }
+//	        return e.Next()
 //	    })
 //
-//	    if err := app.Start(); err != nil {
+//	    // Custom routes alongside the built-in API.
+//	    gb.OnServe().BindFunc(func(e events.Event) error {
+//	        if se, ok := e.(*events.ServeEvent); ok {
+//	            se.Router.Get("/hello", func(w http.ResponseWriter, r *http.Request) {
+//	                w.Write([]byte("Hello from a custom Go route!"))
+//	            })
+//	        }
+//	        return e.Next()
+//	    })
+//
+//	    if err := gb.Start(); err != nil {
 //	        log.Fatal(err)
 //	    }
 //	}
@@ -65,9 +79,9 @@ type Gresbase struct {
 	root *cobra.Command
 
 	// CLI flags (set before Start)
-	dataDir  string
-	devMode  bool
-	addr     string
+	dataDir string
+	devMode bool
+	addr    string
 }
 
 // New creates a new Gresbase instance with default settings.
@@ -98,14 +112,21 @@ func NewWithConfig(cfg *config.Config) *Gresbase {
 		dataDir: cfg.DataDir,
 	}
 
+	// Create the underlying app eagerly (lightweight — no DB yet) so hooks
+	// registered BEFORE Start()/Bootstrap() bind to the real event bus, as
+	// embedding users expect. Heavy initialization is deferred to Bootstrap().
+	if a, err := app.New(cfg); err == nil {
+		gb.app = a
+	}
+
 	// Build CLI
 	gb.root = &cobra.Command{
-		Use:     "gresbase",
-		Short:   "Gresbase — Modern Backend Platform",
-		Long:    `Gresbase is an open-source backend with embedded PostgreSQL, realtime engine, ACME CA, file storage, and admin dashboard.`,
-		Version: Version,
+		Use:                "gresbase",
+		Short:              "Gresbase — Modern Backend Platform",
+		Long:               `Gresbase is an open-source backend with embedded PostgreSQL, realtime engine, ACME CA, file storage, and admin dashboard.`,
+		Version:            Version,
 		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
-		CompletionOptions:   cobra.CompletionOptions{DisableDefaultCmd: true},
+		CompletionOptions:  cobra.CompletionOptions{DisableDefaultCmd: true},
 	}
 
 	gb.root.PersistentFlags().StringVar(&gb.dataDir, "dir", cfg.DataDir, "data directory")
@@ -140,7 +161,7 @@ func (gb *Gresbase) Start() error {
 func (gb *Gresbase) Execute() error {
 	// Parse flags but don't bootstrap yet — commands that need the DB
 	// call Bootstrap themselves via ensureBootstrapped().
-	
+
 	done := make(chan bool, 1)
 
 	go func() {
@@ -165,7 +186,8 @@ func (gb *Gresbase) Execute() error {
 }
 
 // Bootstrap initializes the application (database, migrations, services).
-// Call this before accessing any subsystems.
+// Call this before accessing any subsystems. Hooks registered before Bootstrap
+// are preserved because the underlying app is created eagerly in New().
 func (gb *Gresbase) Bootstrap() error {
 	if gb.IsBootstrapped() {
 		return nil
@@ -176,10 +198,18 @@ func (gb *Gresbase) Bootstrap() error {
 	if gb.addr != "" {
 		gb.cfg.Addr = gb.addr
 	}
+	if err := gb.cfg.ValidateProduction(); err != nil {
+		return fmt.Errorf("invalid production configuration: %w", err)
+	}
 
-	a, err := app.New(gb.cfg)
-	if err != nil {
-		return fmt.Errorf("failed to create app: %w", err)
+	a := gb.app
+	if a == nil {
+		var err error
+		a, err = app.New(gb.cfg)
+		if err != nil {
+			return fmt.Errorf("failed to create app: %w", err)
+		}
+		gb.app = a
 	}
 
 	if err := a.Bootstrap(); err != nil {
@@ -191,7 +221,6 @@ func (gb *Gresbase) Bootstrap() error {
 	a.SetAPIServer(server)
 	a.SetAPIRouter(server)
 
-	gb.app = a
 	return nil
 }
 

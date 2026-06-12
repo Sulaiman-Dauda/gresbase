@@ -8,18 +8,27 @@ import (
 
 func TestHookBindAndTrigger(t *testing.T) {
 	hook := events.NewHook()
+	called := false
 
 	hook.Bind(events.Handler{
 		ID:       "test-handler",
 		Priority: events.PriorityDefault,
 		Func: func(e events.Event) error {
-			t.Log("Handler executed")
+			called = true
 			return e.Next()
 		},
 	})
 
 	if hook.Len() != 1 {
 		t.Errorf("Expected 1 handler, got %d", hook.Len())
+	}
+
+	event := &events.BootstrapEvent{}
+	if err := hook.Trigger(event, func(e events.Event) error { return e.Next() }); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	if !called {
+		t.Fatal("expected handler to be executed")
 	}
 }
 
@@ -117,4 +126,93 @@ func TestBaseEventNextStopsOnAbort(t *testing.T) {
 	}
 
 	_ = called
+}
+
+func TestTaggedHookFiltersByEventTags(t *testing.T) {
+	hook := events.NewHook()
+	called := 0
+
+	hook.Tagged("posts").BindFunc(func(e events.Event) error {
+		called++
+		return e.Next()
+	})
+	hook.Tagged("comments").BindFunc(func(e events.Event) error {
+		called += 100
+		return e.Next()
+	})
+
+	event := &events.RecordEvent{CollectionName: "posts", RecordID: "rec1"}
+	if err := hook.Trigger(event, func(e events.Event) error { return e.Next() }); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("expected only matching tagged handler to run, got %d", called)
+	}
+}
+
+func TestTaggedHookWithoutEventTagsDoesNotRun(t *testing.T) {
+	hook := events.NewHook()
+	called := false
+
+	hook.Tagged("posts").BindFunc(func(e events.Event) error {
+		called = true
+		return e.Next()
+	})
+
+	if err := hook.Trigger(&events.BootstrapEvent{}, func(e events.Event) error { return e.Next() }); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	if called {
+		t.Fatal("expected tagged handler to be skipped for untagged event")
+	}
+}
+
+func TestTriggerExecutesFinalActionThroughHandlerChain(t *testing.T) {
+	hook := events.NewHook()
+	order := []string{}
+
+	hook.BindFunc(func(e events.Event) error {
+		order = append(order, "before")
+		if err := e.Next(); err != nil {
+			return err
+		}
+		order = append(order, "after")
+		return nil
+	})
+
+	err := hook.Trigger(&events.BootstrapEvent{}, func(e events.Event) error {
+		order = append(order, "action")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+
+	want := []string{"before", "action", "after"}
+	if len(order) != len(want) {
+		t.Fatalf("unexpected order length: got %v want %v", order, want)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("unexpected order: got %v want %v", order, want)
+		}
+	}
+}
+
+func TestTriggerPreservesConcreteEventType(t *testing.T) {
+	hook := events.NewHook()
+	gotConcrete := false
+
+	hook.BindFunc(func(e events.Event) error {
+		_, gotConcrete = e.(*events.ServeEvent)
+		return e.Next()
+	})
+
+	err := hook.Trigger(&events.ServeEvent{Addr: ":8090"}, func(e events.Event) error { return nil })
+	if err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	if !gotConcrete {
+		t.Fatal("expected concrete ServeEvent to be passed to handler")
+	}
 }

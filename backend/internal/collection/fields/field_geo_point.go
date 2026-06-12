@@ -25,7 +25,9 @@ func NewGeoPointField(name string) *GeoPointField {
 }
 
 func (f *GeoPointField) PGType() string {
-	if f.UseJSON { return "JSONB" }
+	if f.UseJSON {
+		return "JSONB"
+	}
 	return "POINT"
 }
 
@@ -39,7 +41,9 @@ func (f *GeoPointField) ColumnDef() string {
 
 func (f *GeoPointField) Validate(raw any) (any, error) {
 	if raw == nil {
-		if f.required { return nil, fmt.Errorf("field %q is required", f.name) }
+		if f.required {
+			return nil, fmt.Errorf("field %q is required", f.name)
+		}
 		return nil, nil
 	}
 
@@ -68,13 +72,19 @@ func (f *GeoPointField) parsePoint(raw any) (*GeoPoint, error) {
 		lat, _ := toFloat(v["lat"])
 		lon, _ := toFloat(v["lon"])
 		if n, ok := v["latitude"]; ok {
-			if l, ok := toFloat(n); ok { lat = l }
+			if l, ok := toFloat(n); ok {
+				lat = l
+			}
 		}
 		if n, ok := v["longitude"]; ok {
-			if l, ok := toFloat(n); ok { lon = l }
+			if l, ok := toFloat(n); ok {
+				lon = l
+			}
 		}
 		if n, ok := v["lng"]; ok {
-			if l, ok := toFloat(n); ok { lon = l }
+			if l, ok := toFloat(n); ok {
+				lon = l
+			}
 		}
 		return &GeoPoint{Latitude: lat, Longitude: lon}, nil
 	case string:
@@ -136,8 +146,12 @@ func parseFloat(s string) (float64, error) {
 
 func (f *GeoPointField) Marshal(value any) (any, error) {
 	gp, err := f.Validate(value)
-	if err != nil { return nil, err }
-	if gp == nil { return nil, nil }
+	if err != nil {
+		return nil, err
+	}
+	if gp == nil {
+		return nil, nil
+	}
 	pt := gp.(*GeoPoint)
 
 	if f.UseJSON {
@@ -149,7 +163,9 @@ func (f *GeoPointField) Marshal(value any) (any, error) {
 }
 
 func (f *GeoPointField) Unmarshal(raw any) (any, error) {
-	if raw == nil { return nil, nil }
+	if raw == nil {
+		return nil, nil
+	}
 
 	var gp *GeoPoint
 	switch v := raw.(type) {
@@ -183,7 +199,9 @@ func (f *GeoPointField) Unmarshal(raw any) (any, error) {
 func (f *GeoPointField) Clone() Field {
 	clone := *f
 	clone.options = make(map[string]any)
-	for k, v := range f.options { clone.options[k] = v }
+	for k, v := range f.options {
+		clone.options[k] = v
+	}
 	return &clone
 }
 

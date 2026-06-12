@@ -10,11 +10,14 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gresbase/gresbase/internal/database"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // OAuthProvider defines an OAuth2 provider configuration.
@@ -43,12 +46,34 @@ type OAuthUserInfo struct {
 
 // OAuthState stores an in-flight OAuth authorization.
 type OAuthState struct {
-	ID        string    `json:"id"`
-	Provider  string    `json:"provider"`
-	Redirect  string    `json:"redirect"`
-	State     string    `json:"state"`
-	CodeVerifier string `json:"code_verifier"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	Provider     string    `json:"provider"`
+	Redirect     string    `json:"redirect"`
+	State        string    `json:"state"`
+	CodeVerifier string    `json:"code_verifier"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// OAuthAuthMethodProvider is the PocketBase-style provider descriptor returned
+// by the auth-methods endpoint.
+type OAuthAuthMethodProvider struct {
+	Name                string `json:"name"`
+	DisplayName         string `json:"displayName"`
+	State               string `json:"state"`
+	CodeVerifier        string `json:"codeVerifier,omitempty"`
+	CodeChallenge       string `json:"codeChallenge,omitempty"`
+	CodeChallengeMethod string `json:"codeChallengeMethod,omitempty"`
+	AuthURL             string `json:"authURL"`
+	AuthUrl             string `json:"authUrl"`
+	RedirectURL         string `json:"redirectURL,omitempty"`
+}
+
+// OAuthProviderCatalogItem is the public provider metadata returned by the
+// PocketBase-compatible meta providers route.
+type OAuthProviderCatalogItem struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	Configured  bool   `json:"configured"`
 }
 
 // OAuthService manages OAuth2 authentication flows.
@@ -344,16 +369,69 @@ func NewOAuthService(db *database.DB) *OAuthService {
 		Scopes:      []string{"file_read"},
 	})
 
-	s.RegisterProvider("slack", &OAuthProvider{
-		Name:        "slack",
-		DisplayName: "Slack",
-		AuthURL:     "https://slack.com/openid/connect/authorize",
-		TokenURL:    "https://slack.com/api/openid.connect.token",
-		UserInfoURL: "https://slack.com/api/openid.connect.userInfo",
-		Scopes:      []string{"openid", "profile", "email"},
+	s.RegisterProvider("gitea", &OAuthProvider{
+		Name:        "gitea",
+		DisplayName: "Gitea",
+		AuthURL:     "https://gitea.com/login/oauth/authorize",
+		TokenURL:    "https://gitea.com/login/oauth/access_token",
+		UserInfoURL: "https://gitea.com/api/v1/user",
+		Scopes:      []string{},
+	})
+
+	s.RegisterProvider("gitee", &OAuthProvider{
+		Name:        "gitee",
+		DisplayName: "Gitee",
+		AuthURL:     "https://gitee.com/oauth/authorize",
+		TokenURL:    "https://gitee.com/oauth/token",
+		UserInfoURL: "https://gitee.com/api/v5/user",
+		Scopes:      []string{"user_info"},
+	})
+
+	s.RegisterProvider("instagram", &OAuthProvider{
+		Name:        "instagram",
+		DisplayName: "Instagram",
+		AuthURL:     "https://www.instagram.com/oauth/authorize",
+		TokenURL:    "https://api.instagram.com/oauth/access_token",
+		UserInfoURL: "https://graph.instagram.com/me?fields=id,user_id,username,account_type,profile_picture_url",
+		Scopes:      []string{"instagram_business_basic"},
+	})
+
+	s.RegisterProvider("zoom", &OAuthProvider{
+		Name:        "zoom",
+		DisplayName: "Zoom",
+		AuthURL:     "https://zoom.us/oauth/authorize",
+		TokenURL:    "https://zoom.us/oauth/token",
+		UserInfoURL: "https://api.zoom.us/v2/users/me",
+		Scopes:      []string{},
+	})
+
+	s.RegisterProvider("box", &OAuthProvider{
+		Name:        "box",
+		DisplayName: "Box",
+		AuthURL:     "https://account.box.com/api/oauth2/authorize",
+		TokenURL:    "https://api.box.com/oauth2/token",
+		UserInfoURL: "https://api.box.com/2.0/users/me",
+		Scopes:      []string{"root_readonly"},
+	})
+
+	s.RegisterProvider("wakatime", &OAuthProvider{
+		Name:        "wakatime",
+		DisplayName: "WakaTime",
+		AuthURL:     "https://wakatime.com/oauth/authorize",
+		TokenURL:    "https://wakatime.com/oauth/token",
+		UserInfoURL: "https://wakatime.com/api/v1/users/current",
+		Scopes:      []string{"email"},
 	})
 
 	return s
+}
+
+func (s *OAuthService) exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return s.db.ExecResult(ctx, sql, args...)
+}
+
+func (s *OAuthService) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return s.db.QueryRow(ctx, sql, args...)
 }
 
 // RegisterProvider adds an OAuth provider configuration.
@@ -392,29 +470,96 @@ func (s *OAuthService) GetProviders() []*OAuthProvider {
 // GetAvailableProviders returns the list of enabled providers in
 // PocketBase-compatible format for the auth-methods endpoint.
 func (s *OAuthService) GetAvailableProviders() []map[string]any {
-	var result []map[string]any
-	for _, p := range s.providers {
-		if !p.Enabled && p.ClientID == "" {
-			continue
-		}
+	providers := s.ProviderCatalog(true)
+	result := make([]map[string]any, 0, len(providers))
+	for _, p := range providers {
 		result = append(result, map[string]any{
-			"name":         p.Name,
-			"displayName":  p.DisplayName,
-			"state":        "",
-			"codeVerifier": "",
-			"codeChallenge": "",
-			"codeChallengeMethod": "S256",
-			"authURL":      p.AuthURL,
+			"name":        p.Name,
+			"displayName": p.DisplayName,
 		})
 	}
 	return result
 }
 
+// ProviderCatalog returns the public metadata for registered OAuth providers.
+// When configuredOnly is true, only enabled/configured providers are returned.
+func (s *OAuthService) ProviderCatalog(configuredOnly bool) []OAuthProviderCatalogItem {
+	providers := s.GetProviders()
+	sort.Slice(providers, func(i, j int) bool {
+		if providers[i].DisplayName == providers[j].DisplayName {
+			return providers[i].Name < providers[j].Name
+		}
+		return providers[i].DisplayName < providers[j].DisplayName
+	})
+
+	result := make([]OAuthProviderCatalogItem, 0, len(providers))
+	for _, p := range providers {
+		configured := p.Enabled || strings.TrimSpace(p.ClientID) != ""
+		if configuredOnly && !configured {
+			continue
+		}
+		displayName := strings.TrimSpace(p.DisplayName)
+		if displayName == "" {
+			displayName = p.Name
+		}
+		result = append(result, OAuthProviderCatalogItem{
+			Name:        p.Name,
+			DisplayName: displayName,
+			Configured:  configured,
+		})
+	}
+	return result
+}
+
+// AuthMethodProviders prepares PocketBase-style OAuth provider descriptors for
+// a collection auth-methods response.
+func (s *OAuthService) AuthMethodProviders(ctx context.Context, redirectURL string) []OAuthAuthMethodProvider {
+	catalog := s.ProviderCatalog(true)
+	result := make([]OAuthAuthMethodProvider, 0, len(catalog))
+	for _, item := range catalog {
+		prepared, err := s.prepareAuthRequestContext(ctx, item.Name, redirectURL)
+		if err != nil {
+			continue
+		}
+		result = append(result, OAuthAuthMethodProvider{
+			Name:                item.Name,
+			DisplayName:         item.DisplayName,
+			State:               prepared.State.State,
+			CodeVerifier:        prepared.State.CodeVerifier,
+			CodeChallenge:       prepared.CodeChallenge,
+			CodeChallengeMethod: prepared.CodeChallengeMethod,
+			AuthURL:             prepared.AuthURL,
+			AuthUrl:             prepared.AuthURL,
+			RedirectURL:         prepared.State.Redirect,
+		})
+	}
+	return result
+}
+
+type preparedOAuthRequest struct {
+	AuthURL             string
+	State               *OAuthState
+	CodeChallenge       string
+	CodeChallengeMethod string
+}
+
 // GetAuthURL generates the authorization URL for a provider.
 func (s *OAuthService) GetAuthURL(providerName, redirectURL string) (string, string, error) {
-	p, err := s.GetProvider(providerName)
+	return s.GetAuthURLContext(context.Background(), providerName, redirectURL)
+}
+
+func (s *OAuthService) GetAuthURLContext(ctx context.Context, providerName, redirectURL string) (string, string, error) {
+	prepared, err := s.prepareAuthRequestContext(ctx, providerName, redirectURL)
 	if err != nil {
 		return "", "", err
+	}
+	return prepared.AuthURL, prepared.State.State, nil
+}
+
+func (s *OAuthService) prepareAuthRequestContext(ctx context.Context, providerName, redirectURL string) (*preparedOAuthRequest, error) {
+	p, err := s.GetProvider(providerName)
+	if err != nil {
+		return nil, err
 	}
 
 	state := generateOAuthRandomString(32)
@@ -423,7 +568,7 @@ func (s *OAuthService) GetAuthURL(providerName, redirectURL string) (string, str
 
 	authURL, err := url.Parse(p.AuthURL)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
 	q := authURL.Query()
@@ -436,7 +581,6 @@ func (s *OAuthService) GetAuthURL(providerName, redirectURL string) (string, str
 	q.Set("code_challenge_method", "S256")
 	authURL.RawQuery = q.Encode()
 
-	// Store state
 	oauthState := &OAuthState{
 		ID:           uuid.New().String(),
 		Provider:     providerName,
@@ -447,43 +591,70 @@ func (s *OAuthService) GetAuthURL(providerName, redirectURL string) (string, str
 	}
 
 	stateJSON, _ := json.Marshal(oauthState)
-	_, err = s.db.Pool.Exec(context.Background(),
+	if _, err := s.exec(ctx,
 		`INSERT INTO _oauth_states (id, provider, state, data, created_at) VALUES ($1, $2, $3, $4, $5)
 		 ON CONFLICT (id) DO UPDATE SET data = $4`,
-		oauthState.ID, providerName, state, stateJSON, oauthState.CreatedAt)
+		oauthState.ID, providerName, state, stateJSON, oauthState.CreatedAt); err != nil {
+		return nil, err
+	}
 
-	return authURL.String(), state, err
+	return &preparedOAuthRequest{
+		AuthURL:             authURL.String(),
+		State:               oauthState,
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: "S256",
+	}, nil
 }
 
 // ExchangeCode exchanges an OAuth authorization code for user info.
 func (s *OAuthService) ExchangeCode(ctx context.Context, providerName, code, state, redirectURL string) (*OAuthUserInfo, error) {
+	return s.ExchangeCodeWithVerifier(ctx, providerName, code, state, redirectURL, "")
+}
+
+// ExchangeCodeWithVerifier exchanges an OAuth authorization code for user info
+// while optionally validating an explicit PKCE code verifier.
+func (s *OAuthService) ExchangeCodeWithVerifier(ctx context.Context, providerName, code, state, redirectURL, codeVerifier string) (*OAuthUserInfo, error) {
 	p, err := s.GetProvider(providerName)
 	if err != nil {
 		return nil, err
 	}
 
-	// Verify state
 	var storedState OAuthState
 	var dataJSON []byte
-	err = s.db.Pool.QueryRow(ctx,
+	err = s.queryRow(ctx,
 		`SELECT data FROM _oauth_states WHERE provider = $1 AND state = $2`,
 		providerName, state).Scan(&dataJSON)
 	if err != nil {
 		return nil, fmt.Errorf("invalid OAuth state: %w", err)
 	}
-	json.Unmarshal(dataJSON, &storedState)
+	if err := json.Unmarshal(dataJSON, &storedState); err != nil {
+		return nil, fmt.Errorf("invalid OAuth state payload: %w", err)
+	}
 
-	// Clean up state
-	s.db.Pool.Exec(ctx, "DELETE FROM _oauth_states WHERE provider = $1 AND state = $2", providerName, state)
+	if storedState.Redirect != "" {
+		if strings.TrimSpace(redirectURL) != "" && storedState.Redirect != redirectURL {
+			return nil, fmt.Errorf("oauth redirect mismatch")
+		}
+		redirectURL = storedState.Redirect
+	}
+	if strings.TrimSpace(codeVerifier) != "" && storedState.CodeVerifier != "" && strings.TrimSpace(codeVerifier) != storedState.CodeVerifier {
+		return nil, fmt.Errorf("oauth code verifier mismatch")
+	}
 
-	// Exchange code for token
+	s.exec(ctx, "DELETE FROM _oauth_states WHERE provider = $1 AND state = $2", providerName, state)
+
+	verifier := storedState.CodeVerifier
+	if verifier == "" {
+		verifier = strings.TrimSpace(codeVerifier)
+	}
+
 	tokenData := url.Values{
 		"client_id":     {p.ClientID},
 		"client_secret": {p.ClientSecret},
 		"code":          {code},
 		"grant_type":    {"authorization_code"},
 		"redirect_uri":  {redirectURL},
-		"code_verifier": {storedState.CodeVerifier},
+		"code_verifier": {verifier},
 	}
 
 	tokenResp, err := http.PostForm(p.TokenURL, tokenData)
@@ -506,7 +677,6 @@ func (s *OAuthService) ExchangeCode(ctx context.Context, providerName, code, sta
 		return nil, fmt.Errorf("token error: %s", tokenResult.Error)
 	}
 
-	// Fetch user info
 	user, err := s.fetchUserInfo(ctx, p, tokenResult.AccessToken)
 	if err != nil {
 		return nil, err
@@ -699,6 +869,59 @@ func (s *OAuthService) fetchUserInfo(ctx context.Context, p *OAuthProvider, acce
 			user.Name = fmt.Sprintf("%s %s", result["given_name"], result["family_name"])
 		}
 		user.AvatarURL = fmt.Sprint(result["picture"])
+	case "gitea", "gitee":
+		user.ProviderID = fmt.Sprintf("%.0f", result["id"])
+		user.Email = fmt.Sprint(result["email"])
+		user.Name = fmt.Sprint(result["name"])
+		if user.Name == "" || user.Name == "<nil>" {
+			user.Name = fmt.Sprint(result["full_name"])
+		}
+		if user.Name == "" || user.Name == "<nil>" {
+			user.Name = fmt.Sprint(result["login"])
+		}
+		user.AvatarURL = fmt.Sprint(result["avatar_url"])
+	case "instagram":
+		user.ProviderID = fmt.Sprint(result["user_id"])
+		if user.ProviderID == "" || user.ProviderID == "<nil>" {
+			user.ProviderID = fmt.Sprint(result["id"])
+		}
+		user.Name = fmt.Sprint(result["username"])
+		user.AvatarURL = fmt.Sprint(result["profile_picture_url"])
+	case "zoom":
+		user.ProviderID = fmt.Sprint(result["id"])
+		user.Email = fmt.Sprint(result["email"])
+		user.Name = strings.TrimSpace(fmt.Sprintf("%v %v", result["first_name"], result["last_name"]))
+		user.AvatarURL = fmt.Sprint(result["pic_url"])
+	case "box":
+		user.ProviderID = fmt.Sprint(result["id"])
+		user.Email = fmt.Sprint(result["login"])
+		user.Name = fmt.Sprint(result["name"])
+		user.AvatarURL = fmt.Sprint(result["avatar_url"])
+	case "wakatime":
+		if data, ok := result["data"].(map[string]any); ok {
+			user.ProviderID = fmt.Sprint(data["id"])
+			user.Email = fmt.Sprint(data["email"])
+			user.Name = fmt.Sprint(data["display_name"])
+			user.AvatarURL = fmt.Sprint(data["photo"])
+		}
+	case "strava":
+		user.ProviderID = fmt.Sprintf("%.0f", result["id"])
+		user.Name = strings.TrimSpace(fmt.Sprintf("%v %v", result["firstname"], result["lastname"]))
+		user.AvatarURL = fmt.Sprint(result["profile"])
+	case "figma":
+		user.ProviderID = fmt.Sprint(result["id"])
+		user.Email = fmt.Sprint(result["email"])
+		user.Name = fmt.Sprint(result["handle"])
+		user.AvatarURL = fmt.Sprint(result["img_url"])
+	case "patreon":
+		if data, ok := result["data"].(map[string]any); ok {
+			user.ProviderID = fmt.Sprint(data["id"])
+			if attrs, ok := data["attributes"].(map[string]any); ok {
+				user.Email = fmt.Sprint(attrs["email"])
+				user.Name = fmt.Sprint(attrs["full_name"])
+				user.AvatarURL = fmt.Sprint(attrs["image_url"])
+			}
+		}
 	case "notion":
 		if owner, ok := result["owner"].(map[string]any); ok {
 			if u, ok := owner["user"].(map[string]any); ok {

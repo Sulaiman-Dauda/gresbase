@@ -197,9 +197,9 @@ func TestHTTPChallengeHandler(t *testing.T) {
 
 	// Create a challenge
 	challenge := &Challenge{
-		ID:    "test-challenge",
-		Type:  "http-01",
-		Token: "test-token-abc123",
+		ID:     "test-challenge",
+		Type:   "http-01",
+		Token:  "test-token-abc123",
 		Status: "pending",
 	}
 	svc.mu.Lock()

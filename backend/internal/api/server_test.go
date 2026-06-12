@@ -13,11 +13,11 @@ import (
 
 func TestNewServer(t *testing.T) {
 	cfg := &config.Config{
-		JWTSecret:     "test-jwt-secret",
-		LogLevel:      "error",
-		Addr:          ":8080",
+		JWTSecret:      "test-jwt-secret",
+		LogLevel:       "error",
+		Addr:           ":8080",
 		StorageBackend: "local",
-		StorageLocal:  t.TempDir(),
+		StorageLocal:   t.TempDir(),
 	}
 	application, err := app.New(cfg)
 	if err != nil {

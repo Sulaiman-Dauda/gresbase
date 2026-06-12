@@ -43,22 +43,22 @@ type HealthReport struct {
 
 // SystemInfo contains Go runtime stats.
 type SystemInfo struct {
-	GoVersion  string `json:"go_version"`
-	NumCPU     int    `json:"num_cpu"`
-	NumGoroutines int `json:"num_goroutines"`
-	AllocMB    float64 `json:"alloc_mb"`
-	TotalAllocMB float64 `json:"total_alloc_mb"`
+	GoVersion     string  `json:"go_version"`
+	NumCPU        int     `json:"num_cpu"`
+	NumGoroutines int     `json:"num_goroutines"`
+	AllocMB       float64 `json:"alloc_mb"`
+	TotalAllocMB  float64 `json:"total_alloc_mb"`
 }
 
 // DatabaseMetrics holds database connection pool statistics.
 type DatabaseMetrics struct {
-	Status          Status `json:"status"`
-	Mode            string `json:"mode"` // "embedded" or "external"
-	OpenConnections int32  `json:"open_connections"`
-	IdleConnections int32  `json:"idle_connections"`
-	MaxConnections  int32  `json:"max_connections"`
-	TotalQueries    int64  `json:"total_queries,omitempty"`
-	SlowQueries     int64  `json:"slow_queries,omitempty"`
+	Status          Status  `json:"status"`
+	Mode            string  `json:"mode"` // "embedded" or "external"
+	OpenConnections int32   `json:"open_connections"`
+	IdleConnections int32   `json:"idle_connections"`
+	MaxConnections  int32   `json:"max_connections"`
+	TotalQueries    int64   `json:"total_queries,omitempty"`
+	SlowQueries     int64   `json:"slow_queries,omitempty"`
 	AvgQueryMs      float64 `json:"avg_query_ms,omitempty"`
 }
 
@@ -73,23 +73,26 @@ type RealtimeMetrics struct {
 
 // StorageMetrics holds storage system information.
 type StorageMetrics struct {
-	Status   Status `json:"status"`
-	Backend  string `json:"backend"`
-	FileCount int   `json:"file_count,omitempty"`
-	TotalSize int64 `json:"total_size_bytes,omitempty"`
+	Status    Status `json:"status"`
+	Backend   string `json:"backend"`
+	FileCount int    `json:"file_count,omitempty"`
+	TotalSize int64  `json:"total_size_bytes,omitempty"`
 }
 
 // Collector gathers and reports system metrics.
 type Collector struct {
-	startTime    time.Time
-	queryCount   atomic.Int64
+	startTime      time.Time
+	queryCount     atomic.Int64
 	slowQueryCount atomic.Int64
 	totalQueryTime atomic.Int64 // nanoseconds
-	
+
 	// Callbacks set by the App layer
 	DBStats       func() (open, idle, max int32)
 	DBMode        func() string
 	RealtimeStats func() (clients int, topics, sent, dropped int64)
+	// WALStats reports WAL change-capture counters. Nil when WAL capture is
+	// not enabled.
+	WALStats func() (eventsDecoded, streamRestarts int64, healthy bool)
 }
 
 // NewCollector creates a metrics collector with the current time as start.
@@ -142,12 +145,12 @@ func (c *Collector) Generate(version string) *HealthReport {
 	if c.DBStats != nil {
 		open, idle, max := c.DBStats()
 		dbMetrics := DatabaseMetrics{
-			Status:         StatusHealthy,
+			Status:          StatusHealthy,
 			OpenConnections: open,
 			IdleConnections: idle,
 			MaxConnections:  max,
-			TotalQueries:   c.queryCount.Load(),
-			SlowQueries:    c.slowQueryCount.Load(),
+			TotalQueries:    c.queryCount.Load(),
+			SlowQueries:     c.slowQueryCount.Load(),
 		}
 		if c.DBMode != nil {
 			dbMetrics.Mode = c.DBMode()
@@ -180,9 +183,9 @@ func (c *Collector) Handler(version string) func(w http.ResponseWriter, r *http.
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Cache-Control", "no-cache")
-		
+
 		report := c.Generate(version)
-		
+
 		// Encode JSON manually to avoid circular imports
 		data, err := json.Marshal(report)
 		if err != nil {

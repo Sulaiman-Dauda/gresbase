@@ -11,14 +11,30 @@ cert_email: "admin@example.com"
 database_url: "postgres://gresbase:gresbase@localhost:5432/gresbase?sslmode=disable"
 database_max_open_conns: 25
 database_max_idle_conns: 5
+database_max_idle_time: 5m
 
 # Auth
+jwt_algorithm: "HS256" # HS256 or ES256
+jwt_key_id: "gresbase-default"
 jwt_secret: "change-this-to-a-random-64-char-string-in-production"
+# jwt_private_key: |-
+#   -----BEGIN EC PRIVATE KEY-----
+#   ...
+#   -----END EC PRIVATE KEY-----
+# jwt_public_key: |-
+#   -----BEGIN PUBLIC KEY-----
+#   ...
+#   -----END PUBLIC KEY-----
 access_token_expiry: 15m
-refresh_token_expiry: 168h  # 7 days
+refresh_token_expiry: 168h # 7 days
+
+# HTTP security / CORS
+cors_allowed_origins:
+	- "https://app.example.com"
+cors_allow_credentials: true
 
 # Storage
-storage_backend: "local"  # local or s3
+storage_backend: "local" # local or s3
 storage_local_path: "./storage"
 
 # S3 (optional)
@@ -29,9 +45,15 @@ storage_local_path: "./storage"
 # s3_secret_key: ""
 # s3_use_ssl: true
 
-# ACME
+# ACME — experimental internal certificate authority. Disabled by default;
+# endpoints return 404 until enabled. Use a reverse proxy with certbot/Caddy
+# for production TLS instead.
 acme_cache_dir: "./.certmagic"
 acme_enabled: false
+
+# JavaScript plugins — the goja runtime is NOT sandboxed and runs in-process.
+# Off by default; only enable for trusted, first-party plugin code.
+js_plugins_enabled: false
 
 # Email (SMTP)
 # smtp_host: "smtp.example.com"
@@ -43,6 +65,7 @@ acme_enabled: false
 # Realtime
 realtime_max_connections: 10000
 realtime_idle_timeout: 5m
+realtime_max_message_size: 65536
 
 # Rate Limiting
 rate_limit_enabled: true
@@ -51,4 +74,4 @@ rate_limit_burst: 200
 
 # Development
 dev_mode: false
-log_level: "info"  # debug, info, warn, error
+log_level: "info" # debug, info, warn, error

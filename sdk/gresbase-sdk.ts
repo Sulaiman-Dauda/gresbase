@@ -405,6 +405,19 @@ export class RecordService<T = any> {
     return result
   }
 
+  /** Inspect auth methods and OAuth2 providers for this collection. */
+  async getAuthMethods(): Promise<any> {
+    return this.http.get<any>(`/api/v1/collections/${this.collectionName}/auth-methods`)
+  }
+
+  /** Complete PocketBase-style OAuth2 record authentication. */
+  async authWithOAuth2(provider: string, code: string, state: string, redirectURL: string, codeVerifier?: string): Promise<RecordAuthResponse<T>> {
+    return this.http.post<RecordAuthResponse<T>>(
+      `/api/v1/collections/${this.collectionName}/auth/auth-with-oauth2`,
+      { provider, code, state, redirectURL, codeVerifier }
+    )
+  }
+
   /** Get OAuth2 redirect URL. */
   oAuth2URL(provider: string): string {
     return `${this.http['baseUrl']}/api/v1/collections/${this.collectionName}/auth/oauth2/${provider}`

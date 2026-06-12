@@ -66,10 +66,10 @@ type AppBridge interface {
 
 // Runtime manages compiled JavaScript plugins.
 type Runtime struct {
-	mu       sync.RWMutex
-	plugins  map[string]*ScriptPlugin
-	timeout  time.Duration
-	app      AppBridge
+	mu      sync.RWMutex
+	plugins map[string]*ScriptPlugin
+	timeout time.Duration
+	app     AppBridge
 }
 
 // ScriptPlugin represents a single JS plugin script.
@@ -485,7 +485,12 @@ func (p *ScriptPlugin) setupRuntime(rt *Runtime, vm *goja.Runtime) {
 		return vm.ToValue(map[string]any{
 			"stdout": stdout.String(),
 			"stderr": stderr.String(),
-			"error":  func() string { if err != nil { return err.Error() }; return "" }(),
+			"error": func() string {
+				if err != nil {
+					return err.Error()
+				}
+				return ""
+			}(),
 		})
 	})
 

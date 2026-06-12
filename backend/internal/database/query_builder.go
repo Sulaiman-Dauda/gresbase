@@ -460,8 +460,3 @@ type errorRow struct {
 func (r *errorRow) Scan(dest ...any) error {
 	return r.err
 }
-
-// QuoteIdent quotes a PostgreSQL identifier.
-func QuoteIdent(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-}

@@ -1,72 +1,81 @@
-/// File service for uploading and downloading files.
-library gresbase_sdk_file;
+/// File URL construction, multipart upload, and deletion.
+library;
 
-import 'dart:typed_data';
 import 'http_client.dart';
 
-/// Provides file upload and download operations.
+/// Result of a file upload.
+class FileUploadResult {
+  final String filename;
+  final String url;
+  final int size;
+
+  FileUploadResult({
+    required this.filename,
+    required this.url,
+    required this.size,
+  });
+
+  factory FileUploadResult.fromJson(Map<String, dynamic> json) =>
+      FileUploadResult(
+        filename: json['filename'] as String? ?? '',
+        url: json['url'] as String? ?? '',
+        size: (json['size'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// File operations: URL construction, upload, delete.
 class FileService {
-  final HttpClient _http;
+  final GresbaseHttpClient _http;
 
   FileService(this._http);
 
-  /// Get a file download URL.
-  String getURL(String collection, String recordId, String filename,
-      {String? token}) {
+  /// Build a file download URL.
+  ///
+  /// Options:
+  /// - [token] — access token for protected files
+  /// - [thumb] — thumbnail size (e.g. `'100x100'`)
+  /// - [format] — convert the image (`'jpeg'` or `'png'`)
+  /// - [quality] — quality 1-100 for lossy formats
+  ///
+  /// ```dart
+  /// client.files.getUrl('posts', recordId, 'cover.png',
+  ///     thumb: '300x200', format: 'jpeg', quality: 80);
+  /// ```
+  String getUrl(
+    String collection,
+    String recordId,
+    String filename, {
+    String? token,
+    String? thumb,
+    String? format,
+    int? quality,
+  }) {
     var url = '${_http.baseUrl}/api/v1/files/$collection/$recordId/$filename';
-    if (token != null) {
-      url += '?token=${Uri.encodeComponent(token)}';
+    final query = <String, String>{
+      if (token != null) 'token': token,
+      if (thumb != null) 'thumb': thumb,
+      if (format != null) 'format': format,
+      if (quality != null) 'quality': '$quality',
+    };
+    if (query.isNotEmpty) {
+      url += '?${Uri(queryParameters: query).query}';
     }
     return url;
   }
 
-  /// Upload a file.
-  ///
-  /// Returns the file metadata including filename, url, and size.
-  Future<Map<String, dynamic>> upload(
-    Uint8List fileBytes,
-    String filename,
-  ) async {
-    return _http.upload(
+  /// Upload a file via `multipart/form-data`.
+  Future<FileUploadResult> upload(List<int> bytes, String filename) async {
+    final result = await _http.multipart(
       '/api/v1/files/upload',
-      fileBytes.toList(),
-      filename,
+      fileBytes: bytes,
+      filename: filename,
     );
+    return FileUploadResult.fromJson(result as Map<String, dynamic>);
   }
 
   /// Delete a file.
   Future<void> delete(
       String collection, String recordId, String filename) async {
-    await _http.request(
-      'DELETE',
-      '/api/v1/files/$collection/$recordId/$filename',
-    );
-  }
-
-  /// Download file bytes.
-  Future<Uint8List> download(String collection, String recordId,
-      String filename) async {
-    final url = getURL(collection, recordId, filename);
-    final client = HttpClient();
-    final uri = Uri.parse(url);
-    final request = await client.getUrl(uri);
-
-    final token = _http.getToken?.call();
-    if (token != null && token.isNotEmpty) {
-      request.headers.set('Authorization', 'Bearer $token');
-    }
-
-    final response = await request.close();
-
-    if (response.statusCode >= 400) {
-      throw HttpException('Download failed: HTTP ${response.statusCode}');
-    }
-
-    final bytes = <int>[];
-    await for (final chunk in response) {
-      bytes.addAll(chunk);
-    }
-
-    return Uint8List.fromList(bytes);
+    await _http.send('DELETE', '/api/v1/files/$collection/$recordId/$filename');
   }
 }
