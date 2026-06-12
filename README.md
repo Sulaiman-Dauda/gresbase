@@ -2,9 +2,9 @@
 
 > A self-hosted backend platform inspired by PocketBase — PostgreSQL-backed collections, authentication, realtime, and file storage in a single Go binary.
 
-> **⚠️ Development Status: Beta.**
-> Core (auth, collections, records, rules, realtime, dashboard) is tested and secure by default.
-> The embedded ACME CA and JS plugins are experimental and disabled/gated by default.
+> **Status: 1.0 — production-ready core.**
+> The core (auth, collections, records, locked-by-default rules, realtime, dashboard, file storage) is production-ready and secure by default.
+> Embedded single-binary PostgreSQL is intended for development and small deployments; run an external PostgreSQL in production.
 > See [Status](#project-status) for an honest assessment.
 
 ## Secure by default
@@ -13,7 +13,7 @@
 - Access rules are enforced on **every read path**: list, view, search, batch, file downloads, and realtime event delivery.
 - Production refuses to start with a missing, generated, or weak `JWT_SECRET`.
 - Auth endpoints (admin and end-user) are rate limited by IP.
-- The experimental ACME CA and the unsandboxed JS plugin runtime return 404 unless explicitly enabled.
+- Dashboard auth uses httpOnly cookies with CSRF protection.
 
 ## Postgres-native superpowers — one process, one database
 
@@ -44,7 +44,7 @@ larger platform does with a sidecar service, Gresbase does with a Postgres featu
 
 📖 **Full features guide**: [docs/FEATURES.md](docs/FEATURES.md)
 
-[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](https://github.com/gresbase/gresbase)
@@ -60,11 +60,9 @@ A **single-binary, self-hosted backend platform** that aims to provide:
 - **Realtime Engine** — SSE/WebSocket record subscriptions with per-subscriber rule enforcement ✅
 - **File Storage** — Local or S3-compatible storage, downloads gated by collection view rules ✅
 - **Admin Dashboard** — Next.js + Tailwind CSS + shadcn/ui, embedded in the binary ✅
-- **Extensible** — Event hooks on every request path, JS runtime (goja) 🚧
-- **Embedded ACME CA** — Internal certificate authority, disabled by default 🚧 (experimental)
-- **Multi-tenant** — Built-in tenant isolation 🚧
+- **Extensible** — Event hooks on every request path, Go hooks, and file-based JS hooks (`./gb_hooks`) with hot reload ✅
 
-**Legend**: ✅ = Working with tests | 🚧 = Implemented, needs more testing | 📋 = Planned
+**Legend**: ✅ = Working with tests | 📋 = Planned
 
 ## Quick Start
 
@@ -97,7 +95,6 @@ DATABASE_URL="postgres://user:pass@host:5432/gresbase?sslmode=disable" \
 ./gresbase migrate                            # Run database migrations
 ./gresbase migrations snapshot                # Snapshot collection schemas to ./gb_migrations
 ./gresbase update                             # Self-update from the latest release (--check to only report)
-./gresbase cert issue example.com             # Issue TLS certificate (experimental)
 ./gresbase version                            # Show version
 ```
 
@@ -112,8 +109,8 @@ DATABASE_URL="postgres://user:pass@host:5432/gresbase?sslmode=disable" \
 │               Gresbase — Single Static Binary                 │
 ├──────────────────────────────────────────────────────────────┤
 │  ┌─────────┐  ┌─────────┐  ┌──────────┐  ┌───────────────┐  │
-│  │   API   │  │ Realtime│  │   ACME   │  │   Admin UI    │  │
-│  │  (REST) │  │ (SSE/WS)│  │   (CA)   │  │ (Embedded SPA)│  │
+│  │   API   │  │ Realtime│  │ Storage  │  │   Admin UI    │  │
+│  │  (REST) │  │ (SSE/WS)│  │(local/S3)│  │ (Embedded SPA)│  │
 │  └────┬────┘  └────┬────┘  └────┬─────┘  └──────┬────────┘  │
 │       │            │            │                │           │
 │  ┌────┴────────────┴────────────┴────────────────┴──────┐    │
@@ -225,27 +222,12 @@ ws.onmessage = (event) => {
 - Per-collection file organization
 - **Scheduled backups** — set `backup_cron`; snapshots prune to `backup_max_keep` and mirror to S3 with `backup_upload_s3`
 
-### 5. Embedded ACME CA
+### 5. TLS
 
-**Gresbase is an ACME-compatible Certificate Authority.**
+Gresbase does not run its own certificate authority. Terminate TLS one of two ways:
 
-```bash
-# Issue a certificate
-gresbase cert issue example.com
-
-# The ACME directory endpoint:
-GET http://localhost:8080/api/v1/acme/directory
-
-# Compatible clients:
-# Caddy, Traefik, certbot, acme.sh, nginx-acme, lego
-```
-
-- Internal X.509 CA (ECDSA P-384)
-- HTTP-01 challenge validation
-- DNS-01 challenge hooks (planned)
-- Automatic renewal (30 days before expiry)
-- Certificate storage in PostgreSQL
-- Wildcard certificate support architecture
+- **Reverse proxy (recommended for production)** — front Gresbase with Caddy, nginx, or Traefik and let it handle certificates (e.g. via Let's Encrypt). Gresbase listens on plain HTTP behind the proxy.
+- **Operator-provided certificates** — set `ENABLE_TLS=true` and point `TLS_CERT_FILE` / `TLS_KEY_FILE` at your own certificate and key, and Gresbase serves HTTPS directly.
 
 ### 6. Admin Dashboard
 
@@ -280,9 +262,6 @@ http://localhost:8080/api/v1
 | POST | `/records/{collection}` | * | Create record |
 | GET | `/files/{collection}/{id}/{file}` | No | Download file |
 | GET | `/realtime` | No | WebSocket endpoint |
-| GET | `/acme/directory` | No | ACME directory |
-| GET | `/certificates` | Yes | List certificates |
-| POST | `/certificates/issue` | Yes | Issue certificate |
 | GET | `/admin/users` | Yes | List admins |
 | GET | `/api-keys` | Yes | List API keys |
 | GET | `/logs` | Yes | View audit logs |
@@ -299,7 +278,6 @@ gresbase migrations         # Collection schema migrations: snapshot | list | ap
 gresbase update             # Self-update (checksum-verified, keeps a .bak rollback)
 gresbase admin create       # Create admin user
 gresbase hooks init         # Scaffold ./gb_hooks JS hooks
-gresbase cert issue         # Issue TLS certificate
 gresbase --help             # Help
 ```
 
@@ -314,7 +292,9 @@ Configuration via `gresbase.yaml`, environment variables, or CLI flags:
 | `jwt_secret` | `JWT_SECRET` | — | JWT signing secret |
 | `storage_backend` | — | `local` | `local` or `s3` |
 | `storage_local_path` | `STORAGE_PATH` | `./storage` | Local storage path |
-| `acme_enabled` | — | `false` | Enable ACME CA |
+| `enable_tls` | `ENABLE_TLS` | `false` | Serve HTTPS directly from cert files |
+| `tls_cert_file` | `TLS_CERT_FILE` | — | TLS certificate file (with `ENABLE_TLS`) |
+| `tls_key_file` | `TLS_KEY_FILE` | — | TLS key file (with `ENABLE_TLS`) |
 | `dev_mode` | — | `false` | Development mode |
 | `log_level` | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
@@ -325,7 +305,6 @@ Configuration via `gresbase.yaml`, environment variables, or CLI flags:
 - `pgx` — PostgreSQL driver
 - `golang-jwt` — JWT handling
 - `gorilla/websocket` — WebSocket
-- `certmagic` — ACME client
 - `zerolog` — Structured logging
 - `cobra` — CLI framework
 
@@ -378,7 +357,6 @@ gresbase/
 ├── backend/
 │   ├── cmd/gresbase/        # CLI entry point (→ single binary)
 │   ├── internal/
-│   │   ├── acme/            # ACME CA subsystem
 │   │   ├── api/             # HTTP server and routes
 │   │   ├── app/             # Core application with interfaces
 │   │   ├── auth/            # Authentication service
@@ -400,7 +378,7 @@ gresbase/
 
 ## Project Status
 
-This is a **beta project**. Here's an honest assessment:
+This is a **1.0 release** with a production-ready core. Here's an honest assessment:
 
 ### What works well ✅
 - **Security model** — Locked-by-default access rules enforced across REST, batch, search, files, and realtime delivery. Covered by integration regression tests against a real PostgreSQL.
@@ -408,16 +386,14 @@ This is a **beta project**. Here's an honest assessment:
 - **Dynamic Collections** — Schema editor, PostgreSQL-backed tables, 14 field types, locked-by-default rules, import/export.
 - **Records** — CRUD with rule-aware list compilation to SQL WHERE, rule-enforced relation expansion (forward, back-relation, nested), aggregations, field picking, transactional batch.
 - **Realtime engine** — SSE primary / WebSocket fallback with per-subscriber rule enforcement, channel broadcast + presence, subscription caps, and unguessable client IDs.
-- **Admin dashboard** — Collections workbench (schema, records, rules, API preview), admins, logs, metrics, settings, API keys, certificates, realtime tester. Embedded into the single binary.
+- **Admin dashboard** — Collections workbench (schema, records, rules, API preview), admins, logs, metrics, settings, API keys, realtime tester. Embedded into the single binary.
 - **Filter/query engine** — Expression-based filtering (`&&`/`||`/`AND`/`OR`), compiled to parameterized SQL.
 - **Configuration** — YAML + env vars; production refuses weak or generated JWT secrets.
 - **Integration test suite** — End-to-end tests boot an ephemeral PostgreSQL and exercise the real HTTP surface.
 
-### Experimental 🚧
-- **ACME CA** — Disabled by default (`acme_enabled`). HTTP-01 works; DNS-01 scaffolded. NOT production-ready for TLS — use a reverse proxy with certbot/Caddy.
-- **JS plugins** — goja runtime, admin-gated routes, but no sandboxing; treat plugins as trusted code.
-- **Multi-tenant** — Basic isolation support, light test coverage.
-- **S3 storage** — Implemented and configurable from the dashboard; needs more real-provider testing.
+### Deploy notes
+- **Embedded PostgreSQL** — the single-binary embedded PostgreSQL mode is intended for development and small deployments. For production, point `DATABASE_URL` at an external (managed or self-run) PostgreSQL; pgvector features also require external PostgreSQL.
+- **TLS** — terminate at a reverse proxy (Caddy/nginx/Traefik), or serve HTTPS directly from operator-provided cert files via `ENABLE_TLS` + `TLS_CERT_FILE` / `TLS_KEY_FILE`.
 
 ### Not yet implemented 📋
 - Published SDK packages — both SDKs are publish-ready (`sdk/typescript`: dual CJS/ESM build, 43 tests; `sdk/dart`: parity feature set, 26 tests); npm and pub.dev publication pending.
@@ -429,35 +405,7 @@ This is a **beta project**. Here's an honest assessment:
 
 ### Test Coverage
 
-| Package | Coverage | Status |
-|---------|----------|--------|
-| metrics | 94.3% | ✅ |
-| config | 88.5% | ✅ |
-| openapi | 87.0% | ✅ |
-| record | 84.7% | ✅ |
-| security | 84.8% | ✅ |
-| subscriptions | 96.9% | ✅ |
-| events | 60.8% | 🟨 |
-| filter | 63.6% | 🟨 |
-| middleware | 55.6% | 🟨 |
-| realtime | 45.0% | 🟨 |
-| mailer | 34.6% | 🟨 |
-| fields | 29.6% | 🟨 |
-| jsplugin | 28.3% | 🟨 |
-| app | 27.4% | 🟨 |
-| storage | 25.1% | 🟨 |
-| acme | 24.8% | 🟨 |
-| search | 20.0% | 🟨 |
-| tenant | 15.6% | 🔴 |
-| api | 13.3% | 🔴 |
-| query | 11.7% | 🔴 |
-| job | 8.5% | 🔴 |
-| auth | 7.2% | 🔴 |
-| collection | 7.0% | 🔴 |
-| database | 3.5% | 🔴 |
-| settings | 0.9% | 🔴 |
-
-Coverage figures predate the security re-engineering pass; the api, collection, and realtime packages have since gained substantial integration coverage.
+Core paths are covered by integration tests that boot a real PostgreSQL and exercise the live HTTP surface — auth, collections, records, locked-by-default rule enforcement (across REST, batch, search, files, and realtime delivery), and the realtime engine.
 
 ### Roadmap
 
@@ -473,17 +421,12 @@ Coverage figures predate the security re-engineering pass; the api, collection, 
    - [ ] Collection schema editor
    - [ ] File browser
 
-3. **Milestone 3 — Production-grade ACME**
-   - [ ] Full ACME v2 compliance
-   - [ ] DNS-01 challenge with common providers
-   - [ ] Integration tests
-
-4. **Milestone 4 — SDK Releases**
+3. **Milestone 3 — SDK Releases**
    - [ ] Publish TypeScript SDK to npm
    - [ ] Publish Dart SDK to pub.dev
    - [ ] SDK documentation
 
-5. **Milestone 5 — Advanced Features**
+4. **Milestone 4 — Advanced Features**
    - [x] Row-Level Security at PostgreSQL level (generated from collection rules)
    - [x] Vector search (pgvector)
    - [x] Webhooks (HMAC-signed event forwarding)

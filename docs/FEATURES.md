@@ -24,7 +24,7 @@ your existing Postgres. No extra services, gateways, or sidecars.
 - [Embedding Gresbase as a Go framework](#embedding-gresbase-as-a-go-framework)
 - [Self-update](#self-update)
 - [Operational hardening](#operational-hardening)
-- [Experimental, off by default](#experimental-off-by-default)
+- [TLS](#tls)
 
 ---
 
@@ -60,7 +60,7 @@ Operators: `=` `!=` `>` `>=` `<` `<=` `~` (contains) `!~` `?=` (in) `?!=` and
 
 Request macros available in rules: `@request.auth.id`, `@request.auth.email`,
 `@request.auth.role`, `@request.auth.verified`, `@request.auth.anonymous`,
-`@request.auth.collection`, `@request.auth.tenant`, `@request.method`,
+`@request.auth.collection`, `@request.method`,
 `@request.query.*`, `@request.body.*`.
 
 ---
@@ -501,9 +501,9 @@ registerHook("onRecordCreate", (e) => {
 });
 ```
 
-File hooks load independently of `js_plugins_enabled`: writing to the server's
-filesystem already implies full trust, so they run **unsandboxed** in the
-server process — trusted code only. Configure with `hooks_dir` / `hooks_watch`
+Writing to the server's filesystem already implies full trust, so hooks run
+**unsandboxed** in the server process — trusted code only. Configure with
+`hooks_dir` / `hooks_watch`
 (`HOOKS_DIR`, `HOOKS_WATCH`); set `HOOKS_DIR=""` to disable. A hook file that
 fails to compile is skipped with a warning so one broken hook cannot take the
 others down.
@@ -653,17 +653,16 @@ Small things that decide whether self-hosting is calm or terrifying:
 
 ---
 
-## Experimental, off by default
+## TLS
 
-Per the lean-by-default principle, two subsystems are gated and return `404` until
-explicitly enabled:
+Gresbase does not run its own certificate authority. Terminate TLS one of two
+ways:
 
-- **Embedded ACME CA** (`acme_enabled: true`) — an internal certificate authority.
-  Not production-ready for TLS; use a reverse proxy with certbot/Caddy instead.
-- **JavaScript plugin runtime** (`js_plugins_enabled: true`) — the goja runtime is
-  **not sandboxed** and runs in-process. Enable only for trusted first-party code;
-  prefer Go hooks (above) for extensions. Note that [file hooks](#js-file-hooks-gb_hooks)
-  in `./gb_hooks` load independently of this flag — filesystem access already
-  implies trust.
+- **Reverse proxy (recommended for production)** — front Gresbase with Caddy,
+  nginx, or Traefik and let it handle certificates (e.g. via Let's Encrypt).
+  Gresbase listens on plain HTTP behind the proxy.
+- **Operator-provided certificates** — set `ENABLE_TLS=true` and point
+  `TLS_CERT_FILE` / `TLS_KEY_FILE` at your own certificate and key, and Gresbase
+  serves HTTPS directly.
 
 `GET /api/v1/features` reports which optional capabilities this deployment has.
