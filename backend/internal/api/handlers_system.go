@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gresbase/gresbase/internal/auth"
+	"github.com/gresbase/gresbase/internal/buildinfo"
 	"github.com/gresbase/gresbase/internal/events"
 	"github.com/gresbase/gresbase/internal/forms"
 	"github.com/gresbase/gresbase/internal/openapi"
@@ -31,7 +32,7 @@ func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, status, map[string]any{
 		"status":    statusText,
-		"version":   "0.1.0",
+		"version":   buildinfo.Version,
 		"database":  dbOk,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
@@ -85,7 +86,7 @@ func (h *Handlers) JWKS(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) Metrics(w http.ResponseWriter, r *http.Request) {
 	report := map[string]any{
 		"status":    "healthy",
-		"version":   "0.3.0",
+		"version":   buildinfo.Version,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"database": map[string]any{
 			"status": "connected",
@@ -125,7 +126,7 @@ func (h *Handlers) generateOpenAPISpec(r *http.Request) any {
 	if provider, ok := h.app.APIRouter().(interface{ OpenAPISpec(string) *openapi.Spec }); ok {
 		return provider.OpenAPISpec(baseURL)
 	}
-	return openapi.Generate("0.3.0", baseURL, nil)
+	return openapi.Generate(buildinfo.Version, baseURL, nil)
 }
 
 // SetupStatus checks whether the system needs first-time setup (no admin exists).

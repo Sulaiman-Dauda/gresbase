@@ -56,20 +56,21 @@ import (
 	"github.com/fatih/color"
 	"github.com/gresbase/gresbase/internal/api"
 	"github.com/gresbase/gresbase/internal/app"
+	"github.com/gresbase/gresbase/internal/buildinfo"
 	"github.com/gresbase/gresbase/internal/config"
 	"github.com/gresbase/gresbase/internal/events"
 	"github.com/gresbase/gresbase/internal/ui"
 	"github.com/spf13/cobra"
 )
 
-// Version is the current Gresbase version, set at build time.
-var Version = "0.3.0"
-
-// BuildTime is set at build time via ldflags.
-var BuildTime = "dev"
-
-// GitCommit is set at build time via ldflags.
-var GitCommit = "unknown"
+// Version, BuildTime, and GitCommit re-export the build-stamped metadata from
+// internal/buildinfo (the single source of truth, set via -ldflags) so library
+// consumers of this package keep a stable import path.
+var (
+	Version   = buildinfo.Version
+	BuildTime = buildinfo.BuildTime
+	GitCommit = buildinfo.GitCommit
+)
 
 // Gresbase is the main application struct.
 // It wraps the internal app.App and provides a clean public API.

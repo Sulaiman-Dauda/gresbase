@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/httprate"
 	apimw "github.com/gresbase/gresbase/internal/api/middleware"
 	"github.com/gresbase/gresbase/internal/app"
+	"github.com/gresbase/gresbase/internal/buildinfo"
 	"github.com/gresbase/gresbase/internal/events"
 	"github.com/gresbase/gresbase/internal/openapi"
 	"github.com/gresbase/gresbase/internal/ui"
@@ -466,7 +467,7 @@ func (s *Server) prometheusMetrics(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.app.Metrics().PrometheusHandler("0.3.0")(w, r)
+	s.app.Metrics().PrometheusHandler(buildinfo.Version)(w, r)
 }
 
 // Start begins listening. Supports TLS when configured.
@@ -540,7 +541,7 @@ func (s *Server) OpenAPISpec(baseURL string) *openapi.Spec {
 	if s.extensions != nil {
 		routes = append(routes, openapi.ExtractRoutes(s.extensions)...)
 	}
-	return openapi.Generate("0.3.0", baseURL, routes)
+	return openapi.Generate(buildinfo.Version, baseURL, routes)
 }
 
 func (s *Server) extensionAwareHandler() http.Handler {

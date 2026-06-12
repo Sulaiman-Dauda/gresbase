@@ -1,14 +1,14 @@
 .PHONY: all build build-frontend build-backend dev clean test frontend-dev
 
 # Version — override with make VERSION=1.0.0
-VERSION ?= 0.3.0
+VERSION ?= 1.0.0
 BUILD_TIME = $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 GIT_COMMIT = $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 LDFLAGS = -s -w \
-	-X 'github.com/gresbase/gresbase.Version=$(VERSION)' \
-	-X 'github.com/gresbase/gresbase.BuildTime=$(BUILD_TIME)' \
-	-X 'github.com/gresbase/gresbase.GitCommit=$(GIT_COMMIT)'
+	-X 'github.com/gresbase/gresbase/internal/buildinfo.Version=$(VERSION)' \
+	-X 'github.com/gresbase/gresbase/internal/buildinfo.BuildTime=$(BUILD_TIME)' \
+	-X 'github.com/gresbase/gresbase/internal/buildinfo.GitCommit=$(GIT_COMMIT)'
 
 # ──────────────────────────────────────────────
 # ALL-IN-ONE: Build frontend + embed + backend
