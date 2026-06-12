@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Database,
   Eye,
-  FileKey,
   Gauge,
   Key,
   Loader2,
@@ -49,7 +48,6 @@ const SYSTEM_NAV = [
 
 const POWER_NAV = [
   { title: 'Realtime', href: '/realtime', icon: Activity },
-  { title: 'Certificates', href: '/certificates', icon: FileKey },
   { title: 'API Keys', href: '/api-keys', icon: Key },
 ]
 

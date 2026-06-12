@@ -135,13 +135,6 @@ class ApiClient {
   deleteFile = (collection: string, recordId: string, filename: string) =>
     this.request<any>(`/files/${encodeURIComponent(collection)}/${encodeURIComponent(recordId)}/${encodeURIComponent(filename)}`, { method: 'DELETE' })
 
-  // Certificates
-  getCertificates = () => this.request<any[]>('/certificates')
-  issueCertificate = (domain: string) =>
-    this.request<any>('/certificates/issue', { method: 'POST', body: JSON.stringify({ domain }) })
-  revokeCertificate = (id: string) =>
-    this.request<any>(`/certificates/${id}`, { method: 'DELETE' })
-
   // API Keys
   getApiKeys = () => this.request<any[]>('/api-keys')
   createApiKey = (name: string, permissions: string[] = []) =>
