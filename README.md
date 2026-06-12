@@ -1,6 +1,6 @@
 # Gresbase
 
-> A self-hosted backend platform inspired by PocketBase — PostgreSQL-backed collections, authentication, realtime, and file storage in a single Go binary.
+> A self-hosted backend platform — PostgreSQL-backed collections, authentication, realtime, and file storage in a single Go binary.
 
 > **Status: 1.0 — production-ready core.**
 > The core (auth, collections, records, locked-by-default rules, realtime, dashboard, file storage) is production-ready and secure by default.
@@ -28,7 +28,7 @@ larger platform does with a sidecar service, Gresbase does with a Postgres featu
 - **Typed SDK from your schema** — `gresbase types` or `GET /api/v1/types.ts` generates a typed TypeScript client. PostgREST-style ergonomics, no extra service.
 - **Horizontal realtime** — set `realtime_multi_node: true` and record events travel between app nodes over Postgres `LISTEN/NOTIFY`. No Redis, no broker.
 - **Prometheus metrics in-process** — `GET /metrics` text exposition, optional bearer token. No log-shipping sidecars.
-- **REST aggregations** — `count`, `sum`, `avg`, `min`, `max` with `groupBy`, filtered and **list-rule enforced** in SQL. Neither PocketBase nor PostgREST-less Supabase self-hosting gives you this for free. → `GET /api/v1/records/{c}/aggregate?aggregate=count,sum:amount&groupBy=status`
+- **REST aggregations** — `count`, `sum`, `avg`, `min`, `max` with `groupBy`, filtered and **list-rule enforced** in SQL. Not available in PostgREST-less Supabase self-hosting. → `GET /api/v1/records/{c}/aggregate?aggregate=count,sum:amount&groupBy=status`
 - **Rule-enforced relation expansion** — forward (`?expand=author`), back-relations (`?expand=comments_via_post`), and nested paths (`comments_via_post.user`, up to 6 levels). Every level honors the target collection's rules, so a public collection can never leak a locked one through expand.
 - **Anonymous sign-in** — `POST /api/v1/collections/{c}/auth/auth-with-anonymous` mints a throwaway user for try-before-signup flows. Off by default per collection; gate rules with `@request.auth.anonymous = false`.
 - **Passkeys (WebAuthn)** — phishing-resistant, passwordless sign-in for auth collections, in-process via go-webauthn. Off by default per collection (`allowPasskeys`); discoverable credentials, no email enumeration, SDK helpers included. → `POST /api/v1/collections/{c}/auth/passkey/login-begin`
@@ -38,7 +38,7 @@ larger platform does with a sidecar service, Gresbase does with a Postgres featu
 - **Editable email templates** — every transactional email customizable from the dashboard, validated at save time, with built-in defaults as a can't-break fallback.
 - **Realtime broadcast + presence** — client-to-client channel messages (`POST /api/v1/realtime/broadcast`, auth required) and per-channel presence with join/leave events and member state. Travels across nodes over `LISTEN/NOTIFY` in multi-node mode.
 - **On-the-fly image transforms** — `?thumb=400x300f&format=jpeg&quality=80` on file URLs, generated in-process and cached. The job Supabase runs an `imgproxy` container for.
-- **File-based JS hooks with hot reload** — drop `*.js` files in `./gb_hooks` (PocketBase `pb_hooks`-style) to handle record/auth events; edits reload live. No Deno runtime, no cold starts. Scaffold with `gresbase hooks init` (includes `types.d.ts` for editor autocomplete).
+- **File-based JS hooks with hot reload** — drop `*.js` files in `./gb_hooks` to handle record/auth events; edits reload live. No Deno runtime, no cold starts. Scaffold with `gresbase hooks init` (includes `types.d.ts` for editor autocomplete).
 - **Read-replica routing** — set `DATABASE_REPLICA_URL` and record lists, aggregations, and relation expansion route to a PostgreSQL read replica; writes and rule-feeding reads stay on the primary. The scale lever a single-writer SQLite backend structurally cannot offer.
 - **Embed as a Go framework** — write hooks in real Go and add custom routes; see [`backend/examples/embed`](backend/examples/embed).
 
@@ -204,7 +204,7 @@ ws.onmessage = (event) => {
 }
 ```
 
-- PocketBase-style record topics (`posts/*`, `posts/{id}`)
+- Gresbase record topics (`posts/*`, `posts/{id}`)
 - **Access rules enforced per subscriber** — events from locked/filtered collections are only delivered to clients the rules allow (fail-closed)
 - Per-subscription filter expressions and field picking
 - Cryptographically random client IDs, per-client subscription caps, reserved server event names

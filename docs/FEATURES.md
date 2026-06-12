@@ -1,7 +1,7 @@
 # Gresbase Features Guide
 
 This guide covers the capabilities that make Gresbase a PostgreSQL-native
-alternative to PocketBase, with the power people reach for Supabase for — minus
+self-hosted backend platform, with the power people reach for Supabase for — minus
 the operational sprawl. **The governing principle: PostgreSQL is the only piece
 of infrastructure.** Everything below runs inside the single binary or inside
 your existing Postgres. No extra services, gateways, or sidecars.
@@ -131,8 +131,7 @@ requester could not list.
 
 ## Relation expansion
 
-`?expand=` resolves relations server-side, PocketBase-style, including
-back-relations and nested paths:
+`?expand=` resolves relations server-side, including back-relations and nested paths:
 
 ```bash
 curl "$API/records/posts?expand=author"                  # forward relation
@@ -230,7 +229,7 @@ Details that matter:
 ## Vector search (pgvector)
 
 Add a `vector` field to any collection to store embeddings and run semantic search —
-the AI/RAG use-case PocketBase structurally cannot serve because SQLite. It costs
+the AI/RAG use-case SQLite-based tools structurally cannot serve. It costs
 **zero extra infrastructure**: pgvector is a PostgreSQL extension.
 
 Define a vector field (dashboard schema editor, or via the API):
@@ -298,7 +297,7 @@ options (`files.getURL(..., { thumb, format, quality })`). The generated
 
 ## Realtime
 
-SSE (primary) and WebSocket (fallback) with PocketBase-style record topics:
+SSE (primary) and WebSocket (fallback) with Gresbase record topics:
 
 ```js
 // subscribe to all records in a collection: "posts/*"
@@ -485,7 +484,7 @@ templates with per-template placeholders (e.g. `{{.Link}}`, `{{.Code}}`,
 
 ## JS file hooks (gb_hooks)
 
-PocketBase-style file hooks: drop `*.js` files into `./gb_hooks` and they load
+File-based hooks: drop `*.js` files into `./gb_hooks` and they load
 at boot and hot-reload on change (~2s poll — no filesystem-watcher dependency):
 
 ```bash
@@ -512,7 +511,7 @@ others down.
 
 ## Schema migrations (gb_migrations)
 
-PocketBase-style migration files for collection schemas, so your data model
+Migration files for collection schemas, so your data model
 lives in git and deploys reproducibly. Each file is a declarative JSON
 snapshot — applying it upserts every listed collection to exactly that
 definition (the underlying Postgres table is ALTERed automatically) and

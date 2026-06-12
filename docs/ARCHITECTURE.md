@@ -3,7 +3,7 @@
 ## Overview
 
 Gresbase is a production-grade, single-binary backend platform that combines:
-- Dynamic PostgreSQL-backed collections (like PocketBase)
+- Dynamic PostgreSQL-backed collections
 - Full authentication suite (like Supabase)
 - Embedded ACME certificate authority (like Caddy)
 - Realtime WebSocket engine

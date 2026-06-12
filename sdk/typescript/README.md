@@ -17,7 +17,7 @@ import { GresbaseClient } from 'gresbase-sdk'
 
 const client = new GresbaseClient({ url: 'http://localhost:8080' })
 
-// --- Auth (end users, PocketBase-style) ---
+// --- Auth (end users) ---
 await client.collection('users').authWithPassword('ada@example.com', 'hunter2')
 // Tokens are stored on the client; all subsequent requests are authenticated.
 
