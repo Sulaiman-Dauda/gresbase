@@ -1,43 +1,95 @@
-version: '3.8'
+# ──────────────────────────────────────────────────────────────────────────
+# Gresbase — production-leaning Docker Compose example
+# ──────────────────────────────────────────────────────────────────────────
+# This is a STARTING POINT for a real deployment, not a turnkey production
+# stack. It runs Gresbase against an EXTERNAL PostgreSQL (the recommended
+# setup for production — embedded PostgreSQL is for dev / small single-node
+# use only) and reads all secrets from the environment.
+#
+# Setup:
+#   1. cp .env.example .env   (or create .env — see required vars below)
+#   2. Set a STRONG, EXPLICIT JWT_SECRET (>= 32 chars, never a placeholder).
+#        openssl rand -hex 32
+#   3. Set a strong POSTGRES_PASSWORD.
+#   4. Set CORS_ALLOWED_ORIGINS to your dashboard/app origin(s).
+#   5. docker compose up -d --build
+#
+# Required in .env:   JWT_SECRET, POSTGRES_PASSWORD
+# Recommended:        CORS_ALLOWED_ORIGINS, DOMAIN
+#
+# TLS: terminate at a reverse proxy (Caddy / nginx / Traefik) in front of
+# this stack — do not expose port 8080 directly to the internet. See
+# docs/DEPLOYMENT.md for proxy snippets and the full hardening checklist.
 
 services:
   gresbase:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    image: gresbase:latest
+    # Bind to localhost only; let your reverse proxy handle public TLS.
+    # Change to "8080:8080" only if you intend to expose it directly.
     ports:
-      - '8080:8080'
+      - '127.0.0.1:8080:8080'
     environment:
-      - DATABASE_URL=postgres://gresbase:gresbase@db:5432/gresbase?sslmode=disable
-      - JWT_SECRET=change-this-to-a-random-64-char-string-in-production
-      - STORAGE_PATH=/app/storage
-      - LOG_LEVEL=info
+      # --- Database (external PostgreSQL) ---
+      DATABASE_URL: postgres://gresbase:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/gresbase?sslmode=disable
+
+      # --- Auth (REQUIRED, no default — the binary refuses to serve without it) ---
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in docker/.env — generate with openssl rand -hex 32}
+
+      # --- HTTP security / CORS ---
+      # Must be explicit in production. Comma-separated list of allowed origins.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://app.example.com}
+      # Public base URL — used for email links and WebAuthn. Set to your domain.
+      DOMAIN: ${DOMAIN:-https://app.example.com}
+
+      # --- Reverse-proxy note ---
+      # By default Gresbase IGNORES X-Forwarded-For / X-Real-IP and uses the
+      # direct socket peer for rate limiting and audit logs (spoof-proof).
+      # When behind a reverse proxy, set TRUSTED_PROXIES to the proxy's CIDR(s);
+      # only then are forwarding headers honored, and only from those peers.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+
+      # --- Storage & logging ---
+      STORAGE_PATH: ./storage
+      LOG_LEVEL: info
     volumes:
-      - gresbase_storage:/app/storage
-      - gresbase_config:/app/config
+      # Persist storage, backups, hooks, migrations.
+      - gresbase_data:/data
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/api/v1/health']
+      interval: 30s
+      timeout: 3s
+      start_period: 15s
+      retries: 3
+    # Defense-in-depth: the image already runs as uid 10001.
+    security_opt:
+      - no-new-privileges:true
 
-  db:
-    image: postgres:16-alpine
+  postgres:
+    image: postgres:17
     environment:
-      - POSTGRES_USER=gresbase
-      - POSTGRES_PASSWORD=gresbase
-      - POSTGRES_DB=gresbase
-    ports:
-      - '5432:5432'
+      POSTGRES_USER: gresbase
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: gresbase
+    # Not published to the host by default — only the gresbase service needs it.
+    # Uncomment to connect from the host (e.g. for backups/inspection):
+    # ports:
+    #   - '127.0.0.1:5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U gresbase']
+      test: ['CMD-SHELL', 'pg_isready -U gresbase -d gresbase']
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
 
 volumes:
-  gresbase_storage:
-  gresbase_config:
+  gresbase_data:
   postgres_data:
