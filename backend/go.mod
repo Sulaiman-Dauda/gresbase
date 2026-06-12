@@ -2,6 +2,11 @@ module github.com/gresbase/gresbase
 
 go 1.25.0
 
+// Build with a patched 1.25.x toolchain — pulls in the std-library security
+// fixes (net/textproto, crypto/x509, net/mail, html/template, net) shipped in
+// go1.25.10/1.25.11. `go 1.25.0` remains the minimum a consumer must have.
+toolchain go1.25.11
+
 require (
 	github.com/dop251/goja v0.0.0-20241024094426-79f3a7efcdbd
 	github.com/fatih/color v1.18.0
@@ -22,7 +27,7 @@ require (
 	github.com/tus/tusd/v2 v2.9.2
 	golang.org/x/crypto v0.52.0
 	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8
-	golang.org/x/image v0.21.0
+	golang.org/x/image v0.39.0
 )
 
 require (
