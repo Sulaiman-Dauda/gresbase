@@ -1,17 +1,26 @@
 const API_BASE = '/api/v1'
 
+// readCookie returns the value of a non-HttpOnly cookie, or null. Used to read
+// the gb_csrf double-submit token the server sets on login/refresh.
+function readCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null
+  const match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)'))
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
 class ApiClient {
+  // token is kept only in memory so SDK-style Authorization-header auth still
+  // works within a session; it is no longer persisted to localStorage. Browser
+  // auth is carried by the HttpOnly gb_access cookie set by the server.
   private token: string | null = null
 
   setToken(token: string | null) {
     this.token = token
-    if (token) localStorage.setItem('gresbase_token', token)
-    else localStorage.removeItem('gresbase_token')
   }
 
   getToken(): string | null {
-    if (this.token) return this.token
-    this.token = localStorage.getItem('gresbase_token')
     return this.token
   }
 
@@ -29,6 +38,14 @@ class ApiClient {
     const token = this.getToken()
     if (token) headers['Authorization'] = `Bearer ${token}`
 
+    // Double-submit CSRF: for cookie-authenticated mutating requests, echo the
+    // gb_csrf cookie back in the X-CSRF-Token header.
+    const method = (options.method || 'GET').toUpperCase()
+    if (MUTATING_METHODS.has(method)) {
+      const csrf = readCookie('gb_csrf')
+      if (csrf) headers['X-CSRF-Token'] = csrf
+    }
+
     const res = await fetch(`${API_BASE}${normalizedPath}`, { ...options, headers, credentials: 'include' })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }))
@@ -43,10 +60,14 @@ class ApiClient {
       method: 'POST', body: JSON.stringify({ email, password }),
     })
 
-  refresh = (refreshToken: string) =>
+  // Refresh uses the HttpOnly gb_refresh cookie; an explicit token may still be
+  // passed for SDK-style callers that hold the refresh token in memory.
+  refresh = (refreshToken?: string) =>
     this.request<{ token: string; refreshToken: string }>('/auth/refresh', {
-      method: 'POST', body: JSON.stringify({ refreshToken }),
+      method: 'POST', body: JSON.stringify(refreshToken ? { refreshToken } : {}),
     })
+
+  logout = () => this.request<{ message: string }>('/auth/logout', { method: 'POST' })
 
   // Admin
   getMe = () => this.request<any>('/admin/me')

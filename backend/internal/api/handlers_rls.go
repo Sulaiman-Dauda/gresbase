@@ -32,7 +32,7 @@ func (h *Handlers) rlsOptions(r *http.Request) collection.RLSOptions {
 func (h *Handlers) RLSScript(w http.ResponseWriter, r *http.Request) {
 	colls, err := h.rlsCollections(r)
 	if err != nil {
-		writeError(w, 500, "Failed to load collections: "+err.Error())
+		writeInternalError(w, "Failed to load collections", err)
 		return
 	}
 	script, warnings, err := collection.RLSScript(colls, h.rlsOptions(r))
@@ -47,7 +47,7 @@ func (h *Handlers) RLSScript(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) RLSApply(w http.ResponseWriter, r *http.Request) {
 	colls, err := h.rlsCollections(r)
 	if err != nil {
-		writeError(w, 500, "Failed to load collections: "+err.Error())
+		writeInternalError(w, "Failed to load collections", err)
 		return
 	}
 	warnings, err := h.app.Collections().ApplyRLS(r.Context(), colls, h.rlsOptions(r))
@@ -64,7 +64,7 @@ func (h *Handlers) RLSApply(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) RLSRemove(w http.ResponseWriter, r *http.Request) {
 	colls, err := h.rlsCollections(r)
 	if err != nil {
-		writeError(w, 500, "Failed to load collections: "+err.Error())
+		writeInternalError(w, "Failed to load collections", err)
 		return
 	}
 	if err := h.app.Collections().RemoveRLS(r.Context(), colls); err != nil {

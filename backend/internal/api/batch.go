@@ -83,7 +83,7 @@ func (h *Handlers) HandleBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		return event.Next()
 	}); err != nil {
-		writeError(w, 500, err.Error())
+		writeInternalError(w, "batch", err)
 		return
 	}
 

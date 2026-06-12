@@ -342,3 +342,72 @@ func TestSecurityHeaders(t *testing.T) {
 		}
 	}
 }
+
+func TestCSRFMiddleware(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := CSRF(ok)
+
+	newReq := func(method string, cookies map[string]string, header string) *http.Request {
+		r := httptest.NewRequest(method, "/api/v1/collections/abc", nil)
+		for k, v := range cookies {
+			r.AddCookie(&http.Cookie{Name: k, Value: v})
+		}
+		if header != "" {
+			r.Header.Set(CSRFHeaderName, header)
+		}
+		return r
+	}
+
+	// Safe method: always allowed.
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, newReq(http.MethodGet, map[string]string{AccessCookieName: "tok", CSRFCookieName: "csrf"}, ""))
+	if rr.Code != http.StatusOK {
+		t.Errorf("GET should pass: got %d", rr.Code)
+	}
+
+	// Cookie-auth POST without CSRF header: rejected.
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, newReq(http.MethodPost, map[string]string{AccessCookieName: "tok", CSRFCookieName: "csrf"}, ""))
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("POST without CSRF header should be 403: got %d", rr.Code)
+	}
+
+	// Cookie-auth POST with matching CSRF header: allowed.
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, newReq(http.MethodPost, map[string]string{AccessCookieName: "tok", CSRFCookieName: "csrf"}, "csrf"))
+	if rr.Code != http.StatusOK {
+		t.Errorf("POST with matching CSRF should pass: got %d", rr.Code)
+	}
+
+	// Cookie-auth POST with mismatched CSRF header: rejected.
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, newReq(http.MethodPost, map[string]string{AccessCookieName: "tok", CSRFCookieName: "csrf"}, "wrong"))
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("POST with mismatched CSRF should be 403: got %d", rr.Code)
+	}
+
+	// Authorization-header POST: exempt even without CSRF.
+	rr = httptest.NewRecorder()
+	req := newReq(http.MethodPost, nil, "")
+	req.Header.Set("Authorization", "Bearer xyz")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("Authorization-header POST should be exempt: got %d", rr.Code)
+	}
+
+	// No auth cookie at all: nothing to protect, passes through.
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, newReq(http.MethodPost, nil, ""))
+	if rr.Code != http.StatusOK {
+		t.Errorf("POST without auth cookie should pass through: got %d", rr.Code)
+	}
+
+	// Exempt path (login) with cookie present: passes.
+	rr = httptest.NewRecorder()
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	loginReq.AddCookie(&http.Cookie{Name: AccessCookieName, Value: "tok"})
+	h.ServeHTTP(rr, loginReq)
+	if rr.Code != http.StatusOK {
+		t.Errorf("exempt login path should pass: got %d", rr.Code)
+	}
+}

@@ -37,7 +37,7 @@ func (h *Handlers) RealtimeConnect(w http.ResponseWriter, r *http.Request) {
 		h.app.Realtime().HandleWebSocket(w, r)
 		return nil
 	}); err != nil {
-		writeError(w, 500, err.Error())
+		writeInternalError(w, "realtime connect", err)
 		return
 	}
 }
@@ -49,7 +49,7 @@ func (h *Handlers) RealtimeSSE(w http.ResponseWriter, r *http.Request) {
 		h.app.Realtime().HandleSSE(w, r)
 		return nil
 	}); err != nil {
-		writeError(w, 500, err.Error())
+		writeInternalError(w, "realtime sse", err)
 		return
 	}
 }

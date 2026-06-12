@@ -582,9 +582,9 @@ function CollectionsPageContent() {
                       <CardTitle className="text-base">Filter syntax</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-2 text-xs text-muted-foreground">
-                      <p><code className="font-mono text-foreground">status = "published"</code></p>
+                      <p><code className="font-mono text-foreground">status = &quot;published&quot;</code></p>
                       <p><code className="font-mono text-foreground">owner = @request.auth.id</code></p>
-                      <p><code className="font-mono text-foreground">created_at &gt; "2024-01-01"</code></p>
+                      <p><code className="font-mono text-foreground">created_at &gt; &quot;2024-01-01&quot;</code></p>
                     </CardContent>
                   </Card>
                 </div>

@@ -273,3 +273,38 @@ func TestBuildRuleSQL(t *testing.T) {
 	}
 	t.Logf("SQL: %s, Params: %v", sql, params)
 }
+
+func TestParseFilterRejectsOversizedExpression(t *testing.T) {
+	big := strings.Repeat("a=1 && ", 1000) + "a=1"
+	if _, err := ParseFilter(big); err == nil {
+		t.Fatal("expected error for oversized filter expression")
+	}
+}
+
+func TestParseFilterRejectsTooManyClauses(t *testing.T) {
+	// Many clauses but under the byte cap.
+	parts := make([]string, 0, maxClauses+5)
+	for i := 0; i < maxClauses+5; i++ {
+		parts = append(parts, "a=1")
+	}
+	expr := strings.Join(parts, " && ")
+	if len(expr) > maxExprBytes {
+		t.Fatalf("test expression unexpectedly exceeds byte cap (%d)", len(expr))
+	}
+	if _, err := ParseFilter(expr); err == nil {
+		t.Fatal("expected error for too many clauses")
+	}
+}
+
+func TestParseFilterRejectsDeepNesting(t *testing.T) {
+	expr := strings.Repeat("(", maxDepth+5) + "a=1" + strings.Repeat(")", maxDepth+5)
+	if _, err := ParseFilter(expr); err == nil {
+		t.Fatal("expected error for deeply nested filter expression")
+	}
+}
+
+func TestParseFilterAcceptsReasonableExpression(t *testing.T) {
+	if _, err := ParseFilter(`status = "active" && (age >= 18 || verified = true)`); err != nil {
+		t.Fatalf("reasonable expression should parse, got: %v", err)
+	}
+}

@@ -74,7 +74,7 @@ func (h *Handlers) FileDownload(w http.ResponseWriter, r *http.Request) {
 		Thumb:          thumb,
 	}
 	if err := h.app.OnFileDownloadRequest().Trigger(event, func(e events.Event) error { return event.Next() }); err != nil {
-		writeError(w, 500, err.Error())
+		writeInternalError(w, "file download", err)
 		return
 	}
 
@@ -162,13 +162,13 @@ func (h *Handlers) FileUpload(w http.ResponseWriter, r *http.Request) {
 		Size:           header.Size,
 	}
 	if err := h.app.OnFileUploadRequest().Trigger(event, func(e events.Event) error { return event.Next() }); err != nil {
-		writeError(w, 500, err.Error())
+		writeInternalError(w, "file upload", err)
 		return
 	}
 
 	info, err := h.app.Storage().Upload(r.Context(), event.CollectionName, event.RecordID, file, header)
 	if err != nil {
-		writeError(w, 500, "Upload failed: "+err.Error())
+		writeInternalError(w, "Upload failed", err)
 		return
 	}
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
@@ -224,7 +224,7 @@ func (h *Handlers) FileDelete(w http.ResponseWriter, r *http.Request) {
 		_ = h.app.Storage().DeleteThumbs(r.Context(), event.Path)
 		return h.app.Storage().Delete(r.Context(), event.Path)
 	}); err != nil {
-		writeError(w, 500, "Delete failed: "+err.Error())
+		writeInternalError(w, "Delete failed", err)
 		return
 	}
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)

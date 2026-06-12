@@ -339,7 +339,7 @@ func (h *Handlers) BackupsCreate(w http.ResponseWriter, r *http.Request) {
 		info, err = h.app.Backup().CreateBackup(r.Context(), event.Name, event.IncludeFiles)
 		return err
 	}); err != nil {
-		writeError(w, 500, "Backup failed: "+err.Error())
+		writeInternalError(w, "Backup failed", err)
 		return
 	}
 
@@ -377,7 +377,7 @@ func (h *Handlers) BackupsRestore(w http.ResponseWriter, r *http.Request) {
 	if err := h.app.OnBackupRestoreRequest().Trigger(event, func(e events.Event) error {
 		return h.app.Backup().RestoreBackup(r.Context(), event.BackupID)
 	}); err != nil {
-		writeError(w, 500, "Restore failed: "+err.Error())
+		writeInternalError(w, "Restore failed", err)
 		return
 	}
 
@@ -392,7 +392,7 @@ func (h *Handlers) BackupsDelete(w http.ResponseWriter, r *http.Request) {
 	if err := h.app.OnBackupDeleteRequest().Trigger(event, func(e events.Event) error {
 		return h.app.Backup().DeleteBackup(name)
 	}); err != nil {
-		writeError(w, 500, "Delete failed: "+err.Error())
+		writeInternalError(w, "Delete failed", err)
 		return
 	}
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
@@ -462,7 +462,7 @@ func (h *Handlers) JobsCreate(w http.ResponseWriter, r *http.Request) {
 		jobInfo, err = h.app.Jobs().AddJob(r.Context(), form.Name, form.CronExpr, form.Handler, form.Data)
 		return err
 	}); err != nil {
-		writeError(w, 500, "Failed to create job: "+err.Error())
+		writeInternalError(w, "Failed to create job", err)
 		return
 	}
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
@@ -476,7 +476,7 @@ func (h *Handlers) JobsRun(w http.ResponseWriter, r *http.Request) {
 	if err := h.app.OnJobRequest().Trigger(event, func(e events.Event) error {
 		return h.app.Jobs().RunJob(r.Context(), id)
 	}); err != nil {
-		writeError(w, 500, "Job run failed: "+err.Error())
+		writeInternalError(w, "Job run failed", err)
 		return
 	}
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
@@ -498,7 +498,7 @@ func (h *Handlers) JobsUpdate(w http.ResponseWriter, r *http.Request) {
 	if err := h.app.OnJobRequest().Trigger(event, func(e events.Event) error {
 		return h.app.Jobs().SetJobEnabled(r.Context(), id, *form.Enabled)
 	}); err != nil {
-		writeError(w, 500, "Update failed: "+err.Error())
+		writeInternalError(w, "Update failed", err)
 		return
 	}
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
@@ -512,7 +512,7 @@ func (h *Handlers) JobsRuns(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	runs, err := h.app.Jobs().ListRuns(r.Context(), id, limit)
 	if err != nil {
-		writeError(w, 500, "Failed to list runs: "+err.Error())
+		writeInternalError(w, "Failed to list runs", err)
 		return
 	}
 	writeOK(w, runs)
@@ -524,7 +524,7 @@ func (h *Handlers) JobsDelete(w http.ResponseWriter, r *http.Request) {
 	if err := h.app.OnJobRequest().Trigger(event, func(e events.Event) error {
 		return h.app.Jobs().DeleteJob(r.Context(), id)
 	}); err != nil {
-		writeError(w, 500, "Delete failed: "+err.Error())
+		writeInternalError(w, "Delete failed", err)
 		return
 	}
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)

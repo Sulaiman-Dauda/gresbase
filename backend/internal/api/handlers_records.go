@@ -73,7 +73,7 @@ func (h *Handlers) RecordsList(w http.ResponseWriter, r *http.Request) {
 		records, total, err = qb.List(r.Context())
 		return err
 	}); err != nil {
-		writeError(w, 500, "Failed to list records: "+err.Error())
+		writeInternalError(w, "Failed to list records", err)
 		return
 	}
 
@@ -145,7 +145,7 @@ func (h *Handlers) RecordsCreate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "Validation failed: "+err.Error())
 			return
 		}
-		writeError(w, 500, "Failed to create record: "+err.Error())
+		writeInternalError(w, "Failed to create record", err)
 		return
 	}
 
@@ -270,7 +270,7 @@ func (h *Handlers) RecordsUpdate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "Validation failed: "+err.Error())
 			return
 		}
-		writeError(w, 500, "Failed to update: "+err.Error())
+		writeInternalError(w, "Failed to update", err)
 		return
 	}
 
@@ -320,7 +320,7 @@ func (h *Handlers) RecordsDelete(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, collection.ErrViewReadOnly.Error())
 			return
 		}
-		writeError(w, 500, "Failed to delete: "+err.Error())
+		writeInternalError(w, "Failed to delete", err)
 		return
 	}
 
@@ -402,7 +402,7 @@ func (h *Handlers) SearchRecords(w http.ResponseWriter, r *http.Request) {
 		})
 		return err
 	}); err != nil {
-		writeError(w, 500, "Search failed: "+err.Error())
+		writeInternalError(w, "Search failed", err)
 		return
 	}
 
@@ -451,7 +451,7 @@ func (h *Handlers) FTSCreateIndex(w http.ResponseWriter, r *http.Request) {
 			Weight:     event.Weight,
 		})
 	}); err != nil {
-		writeError(w, 500, "Failed to create index: "+err.Error())
+		writeInternalError(w, "Failed to create index", err)
 		return
 	}
 	writeJSON(w, 201, map[string]any{"message": "FTS index created", "collection": collection})
@@ -463,7 +463,7 @@ func (h *Handlers) FTSRemoveIndex(w http.ResponseWriter, r *http.Request) {
 	if err := h.app.OnFTSIndexRequest().Trigger(event, func(e events.Event) error {
 		return h.app.Search().RemoveIndex(r.Context(), collection)
 	}); err != nil {
-		writeError(w, 500, "Failed to remove index: "+err.Error())
+		writeInternalError(w, "Failed to remove index", err)
 		return
 	}
 	writeOK(w, map[string]any{"message": "FTS index removed", "collection": collection})
@@ -530,14 +530,14 @@ func (h *Handlers) BatchRecords(w http.ResponseWriter, r *http.Request) {
 	if len(form.Creates) > 0 {
 		created, err = h.app.Collections().CreateBatch(r.Context(), coll, form.Creates)
 		if err != nil {
-			writeError(w, 500, "Batch create failed: "+err.Error())
+			writeInternalError(w, "Batch create failed", err)
 			return
 		}
 	}
 
 	if len(form.Updates) > 0 {
 		if err := h.app.Collections().UpdateBatch(r.Context(), coll, form.Updates); err != nil {
-			writeError(w, 500, "Batch update failed: "+err.Error())
+			writeInternalError(w, "Batch update failed", err)
 			return
 		}
 		updated = len(form.Updates)
@@ -545,7 +545,7 @@ func (h *Handlers) BatchRecords(w http.ResponseWriter, r *http.Request) {
 
 	if len(form.Deletes) > 0 {
 		if err := h.app.Collections().DeleteBatch(r.Context(), coll, form.Deletes); err != nil {
-			writeError(w, 500, "Batch delete failed: "+err.Error())
+			writeInternalError(w, "Batch delete failed", err)
 			return
 		}
 		deleted = len(form.Deletes)

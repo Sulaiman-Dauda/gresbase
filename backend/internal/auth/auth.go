@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -20,10 +21,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/gresbase/gresbase/internal/config"
 	"github.com/gresbase/gresbase/internal/database"
+	"github.com/gresbase/gresbase/internal/netutil"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/hkdf"
 )
 
 // TokenType represents the type of token.
@@ -68,14 +71,31 @@ func (s *Service) queryRow(ctx context.Context, sql string, args ...any) pgx.Row
 	return s.db.QueryRow(ctx, sql, args...)
 }
 
-// HashPassword hashes a password using bcrypt.
+// HashPassword hashes a password using bcrypt at the configured cost.
 func (s *Service) HashPassword(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), s.bcryptCost())
 	if err != nil {
 		return "", fmt.Errorf("failed to hash password: %w", err)
 	}
 	return string(hash), nil
 }
+
+// bcryptCost returns the configured bcrypt work factor, defaulting to
+// bcrypt.DefaultCost when unset or out of range.
+func (s *Service) bcryptCost() int {
+	if s != nil && s.cfg != nil {
+		c := s.cfg.BCryptCost
+		if c >= bcrypt.MinCost && c <= bcrypt.MaxCost {
+			return c
+		}
+	}
+	return bcrypt.DefaultCost
+}
+
+// dummyPasswordHash is a fixed, valid bcrypt hash (of a random string) used
+// for constant-time anti-enumeration comparisons when an account is not found.
+// It matches no real password.
+var dummyPasswordHash = []byte("$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy")
 
 // VerifyPassword checks a password against a bcrypt hash.
 func (s *Service) VerifyPassword(hash, password string) bool {
@@ -85,10 +105,34 @@ func (s *Service) VerifyPassword(hash, password string) bool {
 
 // fastHash creates a deterministic SHA-256 HMAC for fast indexed lookup.
 // Used alongside bcrypt for token tables to enable O(1) lookups.
-func fastHash(token string) string {
-	h := hmac.New(sha256.New, []byte("gresbase-token-lookup-v1"))
+//
+// The HMAC key is derived from the configured JWT secret via HKDF, so the
+// lookup hashes are unguessable without the server secret. IMPORTANT: rotating
+// JWT_SECRET changes the derived key and therefore invalidates any outstanding
+// magic-link / password-reset / email-verification / OTP lookup tokens — users
+// must request fresh ones after a secret rotation.
+func (s *Service) fastHash(token string) string {
+	h := hmac.New(sha256.New, s.tokenLookupKey())
 	h.Write([]byte(token))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// tokenLookupKey derives a stable 32-byte HMAC key from the JWT secret using
+// HKDF-SHA256. The info label namespaces the derivation for token lookups.
+func (s *Service) tokenLookupKey() []byte {
+	var secret []byte
+	if s != nil && s.cfg != nil {
+		secret = []byte(s.cfg.JWTSecret)
+	}
+	key := make([]byte, 32)
+	r := hkdf.New(sha256.New, secret, nil, []byte("gresbase-token-lookup-v1"))
+	if _, err := io.ReadFull(r, key); err != nil {
+		// HKDF over SHA-256 never fails for a 32-byte output; fall back defensively.
+		h := hmac.New(sha256.New, secret)
+		h.Write([]byte("gresbase-token-lookup-v1"))
+		return h.Sum(nil)
+	}
+	return key
 }
 
 // GenerateTokens creates an access and refresh token pair.
@@ -162,6 +206,9 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, st
 		var err error
 		admin, err = s.FindAdminByEmail(txCtx, email)
 		if err != nil {
+			// Anti-enumeration: perform a dummy bcrypt comparison so the
+			// response timing does not reveal whether the email exists.
+			bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
 			return fmt.Errorf("invalid credentials")
 		}
 
@@ -412,7 +459,11 @@ func (s *Service) UpdateAdmin(ctx context.Context, id string, updates map[string
 // RecordAudit records an audit log entry.
 func (s *Service) RecordAudit(ctx context.Context, adminID, action, resource, resourceID string, data map[string]any, r *http.Request) {
 	dataJSON, _ := json.Marshal(data)
-	ip := extractIP(r)
+	var trusted []string
+	if s != nil && s.cfg != nil {
+		trusted = s.cfg.TrustedProxies
+	}
+	ip := extractIP(r, trusted)
 	userAgent := ""
 	if r != nil {
 		userAgent = r.Header.Get("User-Agent")
@@ -425,21 +476,18 @@ func (s *Service) RecordAudit(ctx context.Context, adminID, action, resource, re
 	}
 }
 
-func extractIP(r *http.Request) string {
+// extractIP resolves the client IP address. It only honors the
+// X-Forwarded-For / X-Real-IP headers when the immediate peer (RemoteAddr) is
+// within one of the trusted proxy CIDRs; otherwise the direct socket address is
+// used so clients cannot spoof their IP. When no trusted proxies are configured
+// the direct socket address is always returned.
+// extractIP returns the real client IP, honoring X-Forwarded-For/X-Real-IP only
+// when the request arrives from a configured trusted proxy.
+func extractIP(r *http.Request, trustedProxies []string) string {
 	if r == nil {
 		return ""
 	}
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		return ip
-	}
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
-	}
-	ip := r.RemoteAddr
-	if idx := strings.LastIndex(ip, ":"); idx != -1 {
-		ip = ip[:idx]
-	}
-	return ip
+	return netutil.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Real-IP"), trustedProxies)
 }
 
 // CreateOTP generates and stores an OTP code.
@@ -505,7 +553,7 @@ func (s *Service) CreateMagicLink(ctx context.Context, email string) (string, er
 
 	token := generateRandomString(64)
 	tokenHash, _ := s.HashPassword(token)
-	lookupHash := fastHash(token)
+	lookupHash := s.fastHash(token)
 
 	_, err = s.exec(ctx,
 		`INSERT INTO _magic_links (id, admin_id, token_hash, lookup_hash, expires_at, created_at)
@@ -522,7 +570,7 @@ func (s *Service) VerifyMagicLink(ctx context.Context, token string) (*AdminUser
 		return nil, fmt.Errorf("invalid token format")
 	}
 
-	lookup := fastHash(token)
+	lookup := s.fastHash(token)
 
 	// Fast O(1) lookup by indexed lookup_hash column, then bcrypt verify
 	var id, adminID, tokenHash string
@@ -554,7 +602,7 @@ func (s *Service) CreatePasswordResetToken(ctx context.Context, email string) (s
 
 	token := generateRandomString(64)
 	tokenHash, _ := s.HashPassword(token)
-	lookupHash := fastHash(token)
+	lookupHash := s.fastHash(token)
 
 	_, err = s.exec(ctx,
 		`INSERT INTO _password_resets (id, admin_id, token_hash, lookup_hash, expires_at, created_at)
@@ -570,7 +618,7 @@ func (s *Service) ConfirmPasswordReset(ctx context.Context, token, newPassword s
 		return fmt.Errorf("invalid token format")
 	}
 
-	lookup := fastHash(token)
+	lookup := s.fastHash(token)
 
 	return s.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
 		var adminID, tokenHash string
@@ -606,7 +654,7 @@ func (s *Service) CreateVerificationToken(ctx context.Context, email string) (st
 
 	token := generateRandomString(64)
 	tokenHash, _ := s.HashPassword(token)
-	lookupHash := fastHash(token)
+	lookupHash := s.fastHash(token)
 
 	_, err = s.exec(ctx,
 		`INSERT INTO _verifications (id, admin_id, token_hash, lookup_hash, expires_at, created_at)
@@ -622,7 +670,7 @@ func (s *Service) ConfirmVerification(ctx context.Context, token string) error {
 		return fmt.Errorf("invalid token format")
 	}
 
-	lookup := fastHash(token)
+	lookup := s.fastHash(token)
 
 	return s.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
 		var adminID, tokenHash string
@@ -652,7 +700,7 @@ func (s *Service) ConfirmVerification(ctx context.Context, token string) error {
 func (s *Service) CreateEmailChangeToken(ctx context.Context, adminID, newEmail string) (string, error) {
 	token := generateRandomString(64)
 	tokenHash, _ := s.HashPassword(token)
-	lookupHash := fastHash(token)
+	lookupHash := s.fastHash(token)
 
 	_, err := s.exec(ctx,
 		`INSERT INTO _email_changes (id, admin_id, new_email, token_hash, lookup_hash, expires_at, created_at)
@@ -668,7 +716,7 @@ func (s *Service) ConfirmEmailChange(ctx context.Context, token string) error {
 		return fmt.Errorf("invalid token format")
 	}
 
-	lookup := fastHash(token)
+	lookup := s.fastHash(token)
 
 	return s.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
 		var adminID, newEmail, tokenHash string

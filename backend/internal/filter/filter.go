@@ -350,11 +350,25 @@ func (t *tokenizer) readIdent() token {
 // Parser (Pratt parser for operator precedence)
 // ---------------------------------------------------------------------------
 
+// Resource limits guarding against denial-of-service via pathological filter
+// expressions (giant strings, thousands of clauses, deep nesting).
+const (
+	// maxExprBytes caps the raw expression length.
+	maxExprBytes = 4 << 10 // 4 KiB
+	// maxClauses caps the number of comparison/boolean operators.
+	maxClauses = 100
+	// maxDepth caps recursion/nesting depth.
+	maxDepth = 20
+)
+
 type parser struct {
-	tok  *tokenizer
-	cur  token
-	next token
-	err  error
+	tok      *tokenizer
+	cur      token
+	next     token
+	err      error
+	clauses  int
+	depth    int
+	maxDepth int
 }
 
 func newParser(s string) *parser {
@@ -363,6 +377,36 @@ func newParser(s string) *parser {
 	p.cur = tok.next()
 	p.next = tok.next()
 	return p
+}
+
+// enter increments nesting depth and records an error if the limit is exceeded.
+// Returns false when the limit is hit so callers can bail out.
+func (p *parser) enter() bool {
+	p.depth++
+	if p.depth > p.maxDepth {
+		p.maxDepth = p.depth
+	}
+	if p.depth > maxDepth {
+		if p.err == nil {
+			p.err = fmt.Errorf("filter expression nesting too deep (max %d)", maxDepth)
+		}
+		return false
+	}
+	return true
+}
+
+func (p *parser) leave() { p.depth-- }
+
+// addClause counts an operator and records an error if too many are present.
+func (p *parser) addClause() bool {
+	p.clauses++
+	if p.clauses > maxClauses {
+		if p.err == nil {
+			p.err = fmt.Errorf("filter expression too complex (max %d clauses)", maxClauses)
+		}
+		return false
+	}
+	return true
 }
 
 func (p *parser) advance() {
@@ -381,9 +425,19 @@ func (p *parser) parse() (*Expr, error) {
 	return expr, nil
 }
 
+// parsePrimary recurses into parseOr for parenthesized groups; that recursion
+// is depth-guarded by parseOr's enter()/leave().
+
 func (p *parser) parseOr() *Expr {
+	if !p.enter() {
+		return nil
+	}
+	defer p.leave()
 	left := p.parseAnd()
 	for p.cur.kind == tokOr {
+		if !p.addClause() {
+			return nil
+		}
 		op := OpOr
 		p.advance()
 		right := p.parseAnd()
@@ -395,6 +449,9 @@ func (p *parser) parseOr() *Expr {
 func (p *parser) parseAnd() *Expr {
 	left := p.parseNot()
 	for p.cur.kind == tokAnd {
+		if !p.addClause() {
+			return nil
+		}
 		op := OpAnd
 		p.advance()
 		right := p.parseNot()
@@ -417,6 +474,9 @@ func (p *parser) parseComparison() *Expr {
 
 	switch p.cur.kind {
 	case tokEq, tokNeq, tokGt, tokGte, tokLt, tokLte, tokLike, tokNLike, tokIn, tokNIn, tokILike, tokNILike:
+		if !p.addClause() {
+			return nil
+		}
 		op := p.tokenToOp()
 		p.advance()
 		right := p.parsePrimary()
@@ -966,6 +1026,9 @@ func toFloat64(v any) (float64, bool) {
 func ParseFilter(expr string) (*Expr, error) {
 	if strings.TrimSpace(expr) == "" {
 		return nil, nil
+	}
+	if len(expr) > maxExprBytes {
+		return nil, fmt.Errorf("filter expression too long (%d bytes, max %d)", len(expr), maxExprBytes)
 	}
 	return newParser(expr).parse()
 }

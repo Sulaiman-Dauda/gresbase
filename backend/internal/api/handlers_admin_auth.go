@@ -55,6 +55,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	}, func(e events.Event) error { return e.Next() })
 
 	h.app.Auth().RecordAudit(r.Context(), admin.ID, "auth.login", "_admins", admin.ID, nil, r)
+	h.setAuthCookies(w, token, refreshToken)
 	writeOK(w, map[string]any{
 		"token":        token,
 		"refreshToken": refreshToken,
@@ -103,6 +104,7 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	_ = h.app.OnAuthLogin().Trigger(&events.AuthEvent{App: h.app, UserID: admin.ID, Provider: "register", Token: token, RefreshToken: refreshToken}, func(e events.Event) error { return e.Next() })
 	h.app.Auth().RecordAudit(r.Context(), admin.ID, "auth.register", "_admins", admin.ID, nil, r)
 
+	h.setAuthCookies(w, token, refreshToken)
 	writeJSON(w, 201, map[string]any{
 		"token":        token,
 		"refreshToken": refreshToken,
@@ -115,6 +117,13 @@ func (h *Handlers) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSONBody(r, &form); err != nil {
 		writeError(w, 400, "Invalid request body")
 		return
+	}
+	// Browser sessions carry the refresh token in the HttpOnly gb_refresh cookie
+	// rather than the JSON body.
+	if form.RefreshToken == "" {
+		if c, err := r.Cookie(cookieRefresh); err == nil {
+			form.RefreshToken = c.Value
+		}
 	}
 	if err := form.Validate(); err != nil {
 		writeValidationError(w, err)
@@ -141,6 +150,7 @@ func (h *Handlers) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	if claims, claimErr := h.app.Auth().ValidateToken(token); claimErr == nil {
 		_ = h.app.OnAuthRefresh().Trigger(&events.AuthEvent{App: h.app, UserID: claims.AdminID, Provider: "refresh", Token: token, RefreshToken: refreshToken}, func(e events.Event) error { return e.Next() })
 	}
+	h.setAuthCookies(w, token, refreshToken)
 	writeOK(w, map[string]any{"token": token, "refreshToken": refreshToken})
 }
 
@@ -148,6 +158,11 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
 	token := r.Header.Get("Authorization")
 	if len(token) > 7 {
 		token = token[7:]
+	}
+	if token == "" {
+		if c, err := r.Cookie(cookieAccess); err == nil {
+			token = c.Value
+		}
 	}
 	event := &events.AdminAuthRequestEvent{App: h.app, Request: r, Info: toEventRequestInfo(r), Action: "logout", Token: token}
 	if err := h.app.OnAdminAuthRequest().Trigger(event, func(e events.Event) error {
@@ -158,6 +173,7 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 	h.app.Auth().RecordAudit(r.Context(), adminID, "auth.logout", "_admins", adminID, nil, r)
+	h.clearAuthCookies(w)
 	writeOK(w, map[string]any{"message": "Logged out"})
 }
 
@@ -217,6 +233,7 @@ func (h *Handlers) OTPVerify(w http.ResponseWriter, r *http.Request) {
 	_ = h.app.OnAuthLogin().Trigger(&events.AuthEvent{App: h.app, UserID: admin.ID, Provider: "otp", Token: token, RefreshToken: refreshToken}, func(e events.Event) error { return e.Next() })
 	h.app.Auth().RecordAudit(r.Context(), admin.ID, "auth.otp", "_admins", admin.ID, nil, r)
 
+	h.setAuthCookies(w, token, refreshToken)
 	writeOK(w, map[string]any{
 		"token":        token,
 		"refreshToken": refreshToken,
@@ -279,6 +296,7 @@ func (h *Handlers) MagicLinkVerify(w http.ResponseWriter, r *http.Request) {
 	_ = h.app.OnAuthLogin().Trigger(&events.AuthEvent{App: h.app, UserID: admin.ID, Provider: "magiclink", Token: token, RefreshToken: refreshToken}, func(e events.Event) error { return e.Next() })
 	h.app.Auth().RecordAudit(r.Context(), admin.ID, "auth.magiclink", "_admins", admin.ID, nil, r)
 
+	h.setAuthCookies(w, token, refreshToken)
 	writeOK(w, map[string]any{
 		"token":        token,
 		"refreshToken": refreshToken,
@@ -520,7 +538,7 @@ func (h *Handlers) AdminUpdateMe(w http.ResponseWriter, r *http.Request) {
 			writeValidationError(w, err)
 			return
 		}
-		writeError(w, 500, "Failed to update: "+err.Error())
+		writeInternalError(w, "Failed to update", err)
 		return
 	}
 
@@ -654,7 +672,7 @@ func (h *Handlers) AdminUpdate(w http.ResponseWriter, r *http.Request) {
 			writeValidationError(w, err)
 			return
 		}
-		writeError(w, 500, "Failed to update: "+err.Error())
+		writeInternalError(w, "Failed to update", err)
 		return
 	}
 
@@ -720,7 +738,7 @@ func (h *Handlers) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 		admin, err = h.app.Auth().FindOrCreateByOAuth(r.Context(), userInfo)
 		return err
 	}); err != nil {
-		writeError(w, 500, "OAuth exchange failed: "+err.Error())
+		writeInternalError(w, "OAuth exchange failed", err)
 		return
 	}
 
@@ -728,6 +746,7 @@ func (h *Handlers) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 	_ = h.app.OnAuthLogin().Trigger(&events.AuthEvent{App: h.app, UserID: admin.ID, Provider: "oauth:" + provider, Token: token, RefreshToken: refreshToken}, func(e events.Event) error { return e.Next() })
 	h.app.Auth().RecordAudit(r.Context(), admin.ID, "auth.oauth."+provider, "_admins", admin.ID, nil, r)
 
+	h.setAuthCookies(w, token, refreshToken)
 	writeOK(w, map[string]any{
 		"token":        token,
 		"refreshToken": refreshToken,

@@ -8,6 +8,7 @@ import (
 	"github.com/gresbase/gresbase/internal/app"
 	"github.com/gresbase/gresbase/internal/auth"
 	"github.com/gresbase/gresbase/internal/forms"
+	"github.com/rs/zerolog/log"
 )
 
 // Context key aliases for readability
@@ -57,6 +58,15 @@ func writeError(w http.ResponseWriter, status int, message string) {
 		"code":    status,
 		"message": message,
 	})
+}
+
+// writeInternalError logs the full underlying error server-side (so operators
+// can debug) and returns a generic message to the client, never leaking
+// internal details (SQL, stack traces, file paths) in HTTP 5xx responses.
+// context is a short server-side label identifying the failing operation.
+func writeInternalError(w http.ResponseWriter, context string, err error) {
+	log.Error().Err(err).Str("op", context).Msg("internal server error")
+	writeError(w, http.StatusInternalServerError, "Internal server error")
 }
 
 func writeValidationError(w http.ResponseWriter, err error) {

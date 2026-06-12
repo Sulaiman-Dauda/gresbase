@@ -22,32 +22,46 @@ func newNilDBService(t *testing.T) *Service {
 }
 
 func TestExtractIP(t *testing.T) {
-	if got := extractIP(nil); got != "" {
+	if got := extractIP(nil, nil); got != "" {
 		t.Errorf("nil request: got %q, want empty", got)
 	}
 
 	r, _ := http.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "10.0.0.1:54321"
-	if got := extractIP(r); got != "10.0.0.1" {
+
+	// No trusted proxies: always use RemoteAddr, ignoring spoofable headers.
+	if got := extractIP(r, nil); got != "10.0.0.1" {
 		t.Errorf("RemoteAddr: got %q, want 10.0.0.1", got)
 	}
 
 	r.Header.Set("X-Real-IP", "192.168.1.5")
-	if got := extractIP(r); got != "192.168.1.5" {
-		t.Errorf("X-Real-IP: got %q, want 192.168.1.5", got)
+	r.Header.Set("X-Forwarded-For", "203.0.113.7")
+	if got := extractIP(r, nil); got != "10.0.0.1" {
+		t.Errorf("untrusted peer must ignore forwarding headers: got %q, want 10.0.0.1", got)
 	}
 
-	// X-Forwarded-For takes priority over X-Real-IP and RemoteAddr.
-	r.Header.Set("X-Forwarded-For", "203.0.113.7")
-	if got := extractIP(r); got != "203.0.113.7" {
-		t.Errorf("X-Forwarded-For: got %q, want 203.0.113.7", got)
+	// Peer within a trusted CIDR: honor X-Forwarded-For, taking the right-most
+	// untrusted address as the real client.
+	trusted := []string{"10.0.0.0/8"}
+	r.Header.Set("X-Forwarded-For", "203.0.113.7, 10.0.0.9")
+	if got := extractIP(r, trusted); got != "203.0.113.7" {
+		t.Errorf("trusted proxy XFF: got %q, want 203.0.113.7", got)
+	}
+
+	// Trusted peer but no XFF: fall back to X-Real-IP.
+	r2, _ := http.NewRequest(http.MethodGet, "/", nil)
+	r2.RemoteAddr = "10.0.0.1:1234"
+	r2.Header.Set("X-Real-IP", "198.51.100.4")
+	if got := extractIP(r2, trusted); got != "198.51.100.4" {
+		t.Errorf("trusted proxy X-Real-IP: got %q, want 198.51.100.4", got)
 	}
 }
 
 func TestFastHash(t *testing.T) {
-	h1 := fastHash("token-a")
-	h2 := fastHash("token-a")
-	h3 := fastHash("token-b")
+	svc := newNilDBService(t)
+	h1 := svc.fastHash("token-a")
+	h2 := svc.fastHash("token-a")
+	h3 := svc.fastHash("token-b")
 
 	if h1 != h2 {
 		t.Error("fastHash must be deterministic")
@@ -62,6 +76,12 @@ func TestFastHash(t *testing.T) {
 		if !strings.ContainsRune("0123456789abcdef", c) {
 			t.Errorf("non-hex character in hash: %c", c)
 		}
+	}
+
+	// Different JWT secrets must derive different lookup keys.
+	other := NewService(nil, &config.Config{JWTSecret: "a-totally-different-secret"})
+	if other.fastHash("token-a") == h1 {
+		t.Error("fastHash must depend on the JWT secret")
 	}
 }
 

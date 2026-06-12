@@ -299,7 +299,7 @@ func (h *Handlers) RecordAuthOAuth2Callback(w http.ResponseWriter, r *http.Reque
 
 	_, result, err := h.recordOAuth2ExchangeAndAuth(r, "oauth_callback", collName, provider, form.Code, form.State, redirectURL, "")
 	if err != nil {
-		writeError(w, 500, "OAuth auth failed: "+err.Error())
+		writeInternalError(w, "OAuth auth failed", err)
 		return
 	}
 

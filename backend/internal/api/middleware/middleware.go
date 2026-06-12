@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"strings"
@@ -9,6 +10,89 @@ import (
 	"github.com/gresbase/gresbase/internal/app"
 	"github.com/gresbase/gresbase/internal/auth"
 )
+
+// CSRFCookieName is the readable (non-HttpOnly) double-submit CSRF cookie.
+// CSRFHeaderName is the header clients must echo it back in.
+const (
+	CSRFCookieName = "gb_csrf"
+	CSRFHeaderName = "X-CSRF-Token"
+)
+
+// CSRF enforces double-submit CSRF protection for state-changing requests that
+// are authenticated via the gb_access cookie. The rationale:
+//
+//   - Safe methods (GET/HEAD/OPTIONS/TRACE) never mutate state → exempt.
+//   - Requests carrying an Authorization header or a "gb_" API key are not
+//     cookie-based, so the browser does not attach them automatically and they
+//     are not CSRF-vulnerable → exempt.
+//   - Otherwise, if the request carries the gb_access cookie, it must also send
+//     X-CSRF-Token matching the gb_csrf cookie (constant-time compare).
+//
+// Requests with no auth cookie at all (e.g. public record endpoints, login)
+// have no session to protect and pass through; the downstream handler/auth
+// middleware decides whether they are allowed.
+// csrfExemptPaths are pre-session auth endpoints that establish (or rotate) a
+// session and therefore cannot yet present a matching CSRF token. They are not
+// CSRF-sensitive: they require valid credentials (password/refresh token) in the
+// body, which an attacker performing a blind cross-site POST does not possess.
+var csrfExemptPaths = map[string]struct{}{
+	"/api/v1/auth/login":    {},
+	"/api/v1/auth/register": {},
+	"/api/v1/auth/refresh":  {},
+	"/api/v1/setup":         {},
+}
+
+func CSRF(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isSafeMethod(r.Method) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if _, ok := csrfExemptPaths[r.URL.Path]; ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Authorization header / API key requests are not cookie-driven.
+		if authHeader := strings.TrimSpace(r.Header.Get("Authorization")); authHeader != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		accessCookie, err := r.Cookie(AccessCookieName)
+		if err != nil || strings.TrimSpace(accessCookie.Value) == "" {
+			// No cookie session → nothing to protect here.
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		csrfCookie, err := r.Cookie(CSRFCookieName)
+		if err != nil || strings.TrimSpace(csrfCookie.Value) == "" {
+			writeAuthError(w, http.StatusForbidden, "Missing CSRF cookie")
+			return
+		}
+		header := strings.TrimSpace(r.Header.Get(CSRFHeaderName))
+		if header == "" {
+			writeAuthError(w, http.StatusForbidden, "Missing CSRF token")
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(header), []byte(csrfCookie.Value)) != 1 {
+			writeAuthError(w, http.StatusForbidden, "Invalid CSRF token")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isSafeMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return true
+	default:
+		return false
+	}
+}
 
 // Context keys shared with handlers.
 const (
@@ -245,12 +329,23 @@ func asStatus(code int) string {
 	}
 }
 
-// extractCredential pulls a bearer token, raw API key, or query token.
+// AccessCookieName is the HttpOnly cookie that carries the admin access token
+// for browser (dashboard) sessions. The Authorization header takes precedence.
+const AccessCookieName = "gb_access"
+
+// extractCredential pulls a bearer token, raw API key, query token, or — for
+// browser sessions — the HttpOnly gb_access cookie. The Authorization header
+// always takes precedence over the cookie.
 func extractCredential(r *http.Request) string {
 	auth := strings.TrimSpace(r.Header.Get("Authorization"))
 	if auth == "" {
 		if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
 			return token
+		}
+		if c, err := r.Cookie(AccessCookieName); err == nil {
+			if token := strings.TrimSpace(c.Value); token != "" {
+				return token
+			}
 		}
 		return ""
 	}

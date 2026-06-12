@@ -41,9 +41,17 @@ type Server struct {
 func NewServer(application *app.App) *Server {
 	r := chi.NewRouter()
 
+	// Resolve the client IP in a trusted-proxy-aware way (NOT chi's naive
+	// RealIP, which blindly trusts X-Forwarded-For and would let any client
+	// spoof the IP used for rate limiting and audit logs).
+	var trustedProxies []string
+	if application != nil && application.Config() != nil {
+		trustedProxies = application.Config().TrustedProxies
+	}
+
 	// Global middleware
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	r.Use(apimw.RealIP(trustedProxies))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(apimw.TimeoutExcept(60*time.Second, apimw.IsLongLivedRequest))
@@ -81,6 +89,22 @@ func NewServer(application *app.App) *Server {
 
 	r.Use(apimw.SecurityHeaders)
 	r.Use(apimw.RequestIDMiddleware)
+
+	// Request body size cap. TUS and direct file-upload routes stream large
+	// bodies and are exempt; everything else is capped to MaxRequestBodyBytes.
+	maxBody := int64(10 << 20)
+	if application != nil && application.Config() != nil && application.Config().MaxRequestBodyBytes > 0 {
+		maxBody = application.Config().MaxRequestBodyBytes
+	}
+	r.Use(apimw.MaxBodyBytes(maxBody,
+		"/api/v1/files/tus/",
+		"/api/v1/files/upload",
+	))
+
+	// CSRF protection (double-submit). Only enforced for cookie-authenticated
+	// state-changing requests; Authorization-header / API-key callers and
+	// pre-session endpoints (login/refresh/register) are exempt by design.
+	r.Use(apimw.CSRF)
 
 	mw := apimw.NewMiddleware(application)
 	h := NewHandlers(application)

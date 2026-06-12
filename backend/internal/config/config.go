@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Config holds all configuration for the Gresbase platform.
@@ -30,6 +32,17 @@ type Config struct {
 	CORSAllowedOrigins   []string `mapstructure:"cors_allowed_origins"`
 	CORSAllowCredentials bool     `mapstructure:"cors_allow_credentials"`
 
+	// TrustedProxies is a list of CIDR ranges (e.g. 10.0.0.0/8, 127.0.0.1/32)
+	// whose requests may carry trustworthy X-Forwarded-For / X-Real-IP headers.
+	// When empty (the default), client-supplied forwarding headers are ignored
+	// and the direct socket address (RemoteAddr) is always used — the only safe
+	// default when not behind a known reverse proxy.
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
+
+	// MaxRequestBodyBytes caps the size of request bodies for non-streaming
+	// routes (TUS and file uploads are exempt). Default 10 MiB.
+	MaxRequestBodyBytes int64 `mapstructure:"max_request_body_bytes"`
+
 	// Database
 	DatabaseURL          string        `mapstructure:"database_url"`
 	DatabaseMaxOpenConns int           `mapstructure:"database_max_open_conns"`
@@ -38,6 +51,10 @@ type Config struct {
 	EmbeddedPort         int           `mapstructure:"embedded_port"` // port for embedded PostgreSQL
 
 	// Auth
+	// BCryptCost is the bcrypt work factor used to hash admin/record passwords
+	// and API keys. Valid range is 10..14; values outside are clamped with a
+	// warning. Default is bcrypt.DefaultCost (10).
+	BCryptCost         int           `mapstructure:"bcrypt_cost"`
 	JWTSecret          string        `mapstructure:"jwt_secret"`
 	JWTSecretGenerated bool          `mapstructure:"-"`
 	JWTAlgorithm       string        `mapstructure:"jwt_algorithm"`
@@ -175,8 +192,10 @@ type OAuthProviderConfig struct {
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
-		Addr:               ":8080",
-		CORSAllowedOrigins: []string{"*"},
+		Addr:                ":8080",
+		CORSAllowedOrigins:  []string{"*"},
+		MaxRequestBodyBytes: 10 << 20, // 10 MiB
+		BCryptCost:          bcrypt.DefaultCost,
 		// Credentials default to off so the wildcard origin stays safe and
 		// the binary boots in production without CORS configuration. The
 		// dashboard is same-origin and SDKs use bearer tokens, so
@@ -245,6 +264,9 @@ func Load() *Config {
 	viper.BindEnv("data_dir", "DATA_DIR")
 	viper.BindEnv("cors_allow_credentials", "CORS_ALLOW_CREDENTIALS")
 	viper.BindEnv("cors_allowed_origins", "CORS_ALLOWED_ORIGINS")
+	viper.BindEnv("trusted_proxies", "TRUSTED_PROXIES")
+	viper.BindEnv("max_request_body_bytes", "MAX_REQUEST_BODY_BYTES")
+	viper.BindEnv("bcrypt_cost", "BCRYPT_COST")
 	viper.BindEnv("jwt_algorithm", "JWT_ALGORITHM")
 	viper.BindEnv("jwt_key_id", "JWT_KEY_ID")
 	viper.BindEnv("jwt_private_key", "JWT_PRIVATE_KEY")
@@ -289,6 +311,13 @@ func Load() *Config {
 	if origins := os.Getenv("CORS_ALLOWED_ORIGINS"); origins != "" {
 		cfg.CORSAllowedOrigins = splitCSV(origins)
 	}
+	if proxies := os.Getenv("TRUSTED_PROXIES"); proxies != "" {
+		cfg.TrustedProxies = splitCSV(proxies)
+	}
+	if cfg.MaxRequestBodyBytes <= 0 {
+		cfg.MaxRequestBodyBytes = 10 << 20
+	}
+	cfg.BCryptCost = clampBCryptCost(cfg.BCryptCost)
 	cfg.JWTAlgorithm = strings.ToUpper(strings.TrimSpace(cfg.JWTAlgorithm))
 	if cfg.JWTAlgorithm == "" {
 		cfg.JWTAlgorithm = "HS256"
@@ -434,6 +463,25 @@ func containsWildcardOrigin(origins []string) bool {
 		}
 	}
 	return false
+}
+
+// clampBCryptCost keeps the bcrypt work factor within the safe range 10..14.
+// Values outside the range are clamped and a warning is logged. A zero/unset
+// value resolves to bcrypt.DefaultCost without a warning.
+func clampBCryptCost(cost int) int {
+	const minCost, maxCost = 10, 14
+	if cost == 0 {
+		return bcrypt.DefaultCost
+	}
+	if cost < minCost {
+		log.Warn().Int("configured", cost).Int("clamped", minCost).Msg("BCRYPT_COST below minimum; clamping")
+		return minCost
+	}
+	if cost > maxCost {
+		log.Warn().Int("configured", cost).Int("clamped", maxCost).Msg("BCRYPT_COST above maximum; clamping")
+		return maxCost
+	}
+	return cost
 }
 
 func generateRandomSecret() string {

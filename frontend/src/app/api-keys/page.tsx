@@ -142,7 +142,7 @@ export default function ApiKeysPage() {
               <span className="font-medium text-emerald-600">API Key Generated</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              Copy this key now. You won't be able to see it again.
+              Copy this key now. You won&apos;t be able to see it again.
             </p>
             <div className="flex items-center gap-2">
               <code className="flex-1 rounded-lg bg-muted px-3 py-2 text-sm font-mono break-all">

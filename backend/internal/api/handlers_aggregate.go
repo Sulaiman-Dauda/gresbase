@@ -191,7 +191,7 @@ func (h *Handlers) RecordsAggregate(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.app.DB().ReadQuery(r.Context(), sql, whereArgs...)
 	if err != nil {
-		writeError(w, 500, "Aggregate query failed: "+err.Error())
+		writeInternalError(w, "Aggregate query failed", err)
 		return
 	}
 	defer rows.Close()

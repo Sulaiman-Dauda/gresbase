@@ -70,7 +70,7 @@ func (h *Handlers) CollectionsCreate(w http.ResponseWriter, r *http.Request) {
 			writeValidationError(w, err)
 			return
 		}
-		writeError(w, 500, "Failed to create collection: "+err.Error())
+		writeInternalError(w, "Failed to create collection", err)
 		return
 	}
 
@@ -132,7 +132,7 @@ func (h *Handlers) CollectionsUpdate(w http.ResponseWriter, r *http.Request) {
 			writeValidationError(w, err)
 			return
 		}
-		writeError(w, 500, "Failed to update collection: "+err.Error())
+		writeInternalError(w, "Failed to update collection", err)
 		return
 	}
 	postCommitCtx := cloneRequestContext(r.Context(), false)
@@ -154,7 +154,7 @@ func (h *Handlers) CollectionsDelete(w http.ResponseWriter, r *http.Request) {
 	if err := h.app.OnCollectionRequest().Trigger(event, func(e events.Event) error {
 		return h.app.Collections().DeleteCollection(r.Context(), id)
 	}); err != nil {
-		writeError(w, 500, "Failed to delete collection: "+err.Error())
+		writeInternalError(w, "Failed to delete collection", err)
 		return
 	}
 	if coll != nil {
@@ -190,7 +190,7 @@ func (h *Handlers) CollectionsImport(w http.ResponseWriter, r *http.Request) {
 	if err := h.app.OnCollectionsImportRequest().Trigger(event, func(e events.Event) error {
 		return h.app.Collections().ImportCollections(r.Context(), event.CollectionsData, event.DeleteMissing)
 	}); err != nil {
-		writeError(w, 500, "Failed to import collections: "+err.Error())
+		writeInternalError(w, "Failed to import collections", err)
 		return
 	}
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)

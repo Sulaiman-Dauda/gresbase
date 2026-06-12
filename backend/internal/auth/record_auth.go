@@ -619,7 +619,7 @@ func (ras *RecordAuthService) RequestRecordPasswordReset(ctx context.Context, co
 
 	token := generateToken(64)
 	tokenHash, _ := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
-	lookupHash := fastHash(token)
+	lookupHash := ras.authSvc.fastHash(token)
 
 	_, err = ras.exec(ctx, `
 		INSERT INTO _record_password_resets (id, record_id, collection_id, token_hash, lookup_hash, expires_at, created_at)
@@ -633,7 +633,7 @@ func (ras *RecordAuthService) ConfirmRecordPasswordReset(ctx context.Context, to
 	if token == "" || len(token) < 32 {
 		return fmt.Errorf("invalid token format")
 	}
-	lookupHash := fastHash(token)
+	lookupHash := ras.authSvc.fastHash(token)
 
 	return ras.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
 		var recordID, collectionID, tokenHash string
@@ -672,7 +672,7 @@ func (ras *RecordAuthService) RequestRecordVerification(ctx context.Context, col
 
 	token := generateToken(64)
 	tokenHash, _ := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
-	lookupHash := fastHash(token)
+	lookupHash := ras.authSvc.fastHash(token)
 
 	_, err = ras.exec(ctx, `
 		INSERT INTO _record_verifications (id, record_id, collection_id, token_hash, lookup_hash, expires_at, created_at)
@@ -686,7 +686,7 @@ func (ras *RecordAuthService) ConfirmRecordVerification(ctx context.Context, tok
 	if token == "" || len(token) < 32 {
 		return fmt.Errorf("invalid token format")
 	}
-	lookupHash := fastHash(token)
+	lookupHash := ras.authSvc.fastHash(token)
 
 	return ras.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
 		var recordID, collectionID, tokenHash string
@@ -730,7 +730,7 @@ func (ras *RecordAuthService) RequestRecordEmailChange(ctx context.Context, coll
 
 	token := generateToken(64)
 	tokenHash, _ := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
-	lookupHash := fastHash(token)
+	lookupHash := ras.authSvc.fastHash(token)
 
 	_, err = ras.exec(ctx, `
 		INSERT INTO _record_email_changes (id, record_id, collection_id, new_email, token_hash, lookup_hash, expires_at, created_at)
@@ -744,7 +744,7 @@ func (ras *RecordAuthService) ConfirmRecordEmailChange(ctx context.Context, toke
 	if token == "" || len(token) < 32 {
 		return fmt.Errorf("invalid token format")
 	}
-	lookupHash := fastHash(token)
+	lookupHash := ras.authSvc.fastHash(token)
 
 	return ras.db.RunInTransactionContext(ctx, func(txCtx context.Context, tx database.Tx) error {
 		var recordID, collectionID, newEmail, tokenHash string

@@ -34,7 +34,7 @@ func maskedWebhook(hook *webhook.Webhook) *webhook.Webhook {
 func (h *Handlers) WebhooksList(w http.ResponseWriter, r *http.Request) {
 	hooks, err := h.app.Webhooks().List(r.Context())
 	if err != nil {
-		writeError(w, 500, "Failed to list webhooks: "+err.Error())
+		writeInternalError(w, "Failed to list webhooks", err)
 		return
 	}
 	masked := make([]*webhook.Webhook, 0, len(hooks))
@@ -150,7 +150,7 @@ func (h *Handlers) WebhooksDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.app.Webhooks().Delete(r.Context(), id); err != nil {
-		writeError(w, 500, "Failed to delete webhook: "+err.Error())
+		writeInternalError(w, "Failed to delete webhook", err)
 		return
 	}
 
@@ -170,7 +170,7 @@ func (h *Handlers) WebhooksDeliveries(w http.ResponseWriter, r *http.Request) {
 
 	deliveries, err := h.app.Webhooks().ListDeliveries(r.Context(), id, limit)
 	if err != nil {
-		writeError(w, 500, "Failed to list deliveries: "+err.Error())
+		writeInternalError(w, "Failed to list deliveries", err)
 		return
 	}
 	writeOK(w, map[string]any{"deliveries": deliveries})

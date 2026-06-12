@@ -199,3 +199,43 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
+
+func TestClampBCryptCost(t *testing.T) {
+	cases := []struct{ in, want int }{
+		{0, 10},  // unset -> default
+		{4, 10},  // below min -> clamp up
+		{10, 10}, // in range
+		{12, 12}, // in range
+		{14, 14}, // max
+		{20, 14}, // above max -> clamp down
+	}
+	for _, c := range cases {
+		if got := clampBCryptCost(c.in); got != c.want {
+			t.Errorf("clampBCryptCost(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+func TestDefaultConfigSecurityDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.MaxRequestBodyBytes != 10<<20 {
+		t.Errorf("MaxRequestBodyBytes default = %d, want %d", cfg.MaxRequestBodyBytes, 10<<20)
+	}
+	if cfg.BCryptCost != 10 {
+		t.Errorf("BCryptCost default = %d, want 10", cfg.BCryptCost)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("TrustedProxies should default empty, got %v", cfg.TrustedProxies)
+	}
+}
+
+func TestValidateProductionCORSCredentialsWildcard(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DevMode = false
+	cfg.JWTSecret = strings.Repeat("x", 40)
+	cfg.CORSAllowedOrigins = []string{"*"}
+	cfg.CORSAllowCredentials = true
+	if err := cfg.ValidateProduction(); err == nil {
+		t.Fatal("expected error: credentials + wildcard origin must be rejected in production")
+	}
+}
