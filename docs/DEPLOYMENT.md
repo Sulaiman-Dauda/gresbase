@@ -289,7 +289,10 @@ volume), or rely on S3 versioning when using the `s3` backend.
   relation expansion) to a PostgreSQL read replica. Writes and rule-feeding
   reads stay on the primary; expect normal replication lag. If the replica is
   unreachable at boot, Gresbase logs a warning and serves all reads from the
-  primary. Ignored in embedded mode.
+  primary. At runtime a background health probe (every 10s) automatically
+  fails reads over to the primary if the replica becomes unreachable and
+  resumes routing to it once it recovers — no restart needed. Ignored in
+  embedded mode.
 - **Multi-node realtime:** set `REALTIME_MULTI_NODE=true` so record events fan
   out across nodes via PostgreSQL `LISTEN/NOTIFY` (no external broker). Requires
   external PostgreSQL.

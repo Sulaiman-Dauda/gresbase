@@ -2,9 +2,11 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gresbase/gresbase/internal/config"
@@ -37,6 +39,12 @@ type DB struct {
 	// aggregations, relation expansion). Writes, transactional reads, and
 	// reads that feed rule checks before writes always use the primary.
 	readPool *pgxpool.Pool
+	// readHealthy gates routing to the replica. A background probe flips it to
+	// false when the replica is unreachable (so reads transparently fall back
+	// to the primary) and back to true when it recovers. ReadQuery also flips
+	// it on a connection-level failure mid-request.
+	readHealthy atomic.Bool
+	replicaStop chan struct{}
 
 	vectorOnce      sync.Once
 	vectorAvailable bool
@@ -132,6 +140,9 @@ func New(cfg *config.Config) (*DB, error) {
 			log.Warn().Err(err).Msg("Read replica unavailable — all reads stay on the primary")
 		} else {
 			db.readPool = readPool
+			db.readHealthy.Store(true)
+			db.replicaStop = make(chan struct{})
+			go db.monitorReplica()
 			log.Info().Msg("Connected to PostgreSQL read replica ✓ (lists, aggregations, and expansion route here)")
 		}
 	}
@@ -164,6 +175,10 @@ func newReplicaPool(cfg *config.Config) (*pgxpool.Pool, error) {
 
 // Close closes the database connection pool and stops embedded PostgreSQL if running.
 func (db *DB) Close() {
+	if db.replicaStop != nil {
+		close(db.replicaStop)
+		db.replicaStop = nil
+	}
 	if db.Pool != nil {
 		db.Pool.Close()
 	}
@@ -213,8 +228,21 @@ func (db *DB) ReadQuery(ctx context.Context, sql string, args ...any) (pgx.Rows,
 	if tx, ok := TxFromContext(ctx); ok {
 		return tx.Query(ctx, sql, args...)
 	}
-	if db.readPool != nil {
-		return db.readPool.Query(ctx, sql, args...)
+	if db.readPool != nil && db.readHealthy.Load() {
+		rows, err := db.readPool.Query(ctx, sql, args...)
+		if err == nil {
+			return rows, nil
+		}
+		// A PgError means the replica processed and rejected the query (e.g. a
+		// SQL error); it would fail identically on the primary, so surface it.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			return rows, err
+		}
+		// Otherwise it's a connection-level failure: mark the replica unhealthy
+		// and transparently retry on the primary.
+		db.readHealthy.Store(false)
+		log.Warn().Err(err).Msg("Read replica unreachable — falling back to primary")
 	}
 	return db.Pool.Query(ctx, sql, args...)
 }
@@ -224,10 +252,36 @@ func (db *DB) ReadQueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 	if tx, ok := TxFromContext(ctx); ok {
 		return tx.QueryRow(ctx, sql, args...)
 	}
-	if db.readPool != nil {
+	if db.readPool != nil && db.readHealthy.Load() {
 		return db.readPool.QueryRow(ctx, sql, args...)
 	}
 	return db.Pool.QueryRow(ctx, sql, args...)
+}
+
+// monitorReplica periodically pings the read replica and toggles readHealthy so
+// reads automatically fall back to the primary while the replica is unreachable
+// and resume routing to it once it recovers.
+func (db *DB) monitorReplica() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-db.replicaStop:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			err := db.readPool.Ping(ctx)
+			cancel()
+			healthy := err == nil
+			if prev := db.readHealthy.Swap(healthy); prev != healthy {
+				if healthy {
+					log.Info().Msg("Read replica recovered — routing replica-safe reads to it again")
+				} else {
+					log.Warn().Err(err).Msg("Read replica unhealthy — routing reads to the primary")
+				}
+			}
+		}
+	}
 }
 
 // HasReadReplica reports whether a read replica pool is active.
