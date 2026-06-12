@@ -150,9 +150,6 @@ type Config struct {
 	DevMode  bool   `mapstructure:"dev_mode"`
 	LogLevel string `mapstructure:"log_level"`
 
-	// Multi-tenant
-	MultiTenant bool `mapstructure:"multi_tenant"`
-
 	// Hide banner on startup
 	HideStartBanner bool `mapstructure:"hide_start_banner"`
 }
@@ -286,7 +283,6 @@ func Load() *Config {
 	viper.BindEnv("smtp_from", "SMTP_FROM")
 	viper.BindEnv("dev_mode", "DEV_MODE")
 	viper.BindEnv("log_level", "LOG_LEVEL")
-	viper.BindEnv("multi_tenant", "MULTI_TENANT")
 	viper.BindEnv("hide_start_banner", "HIDE_START_BANNER")
 
 	viper.Unmarshal(cfg)

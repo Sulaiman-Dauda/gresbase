@@ -25,7 +25,6 @@ import (
 	"github.com/gresbase/gresbase/internal/schemamigrate"
 	"github.com/gresbase/gresbase/internal/settings"
 	"github.com/gresbase/gresbase/internal/storage"
-	"github.com/gresbase/gresbase/internal/tenant"
 	"github.com/gresbase/gresbase/internal/tools/search"
 	"github.com/gresbase/gresbase/internal/walcapture"
 	"github.com/gresbase/gresbase/internal/webhook"
@@ -70,7 +69,6 @@ type App struct {
 	pluginRegistry  *plugin.Registry
 	jsRuntime       *jsplugin.Runtime
 	searchProvider  *search.Provider
-	tenantService   *tenant.Service
 	settingsService *settings.Service
 	webhookService  *webhook.Service
 	metricsColl     *metrics.Collector
@@ -301,9 +299,6 @@ func (app *App) Bootstrap() error {
 
 	// 2e. Search provider
 	app.searchProvider = search.NewProvider(app.db)
-
-	// 2d. Tenant service
-	app.tenantService = tenant.NewService(app.db)
 
 	// 2e. Settings service
 	app.settingsService = settings.NewService(app.db)
@@ -634,7 +629,6 @@ func (app *App) IsReady() bool                           { app.mu.RLock(); defer
 func (app *App) IsBootstrapped() bool                    { return app.IsReady() }
 func (app *App) Jobs() *job.Scheduler                    { return app.jobScheduler }
 func (app *App) Plugins() *plugin.Registry               { return app.pluginRegistry }
-func (app *App) Tenants() *tenant.Service                { return app.tenantService }
 func (app *App) JSRuntime() *jsplugin.Runtime            { return app.jsRuntime }
 func (app *App) Search() *search.Provider                { return app.searchProvider }
 func (app *App) Settings() *settings.Service             { return app.settingsService }

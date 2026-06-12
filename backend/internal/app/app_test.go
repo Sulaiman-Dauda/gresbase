@@ -126,9 +126,6 @@ func TestApp_AccessorsBeforeBootstrap(t *testing.T) {
 	if app.Plugins() != nil {
 		t.Error("expected nil Plugins before bootstrap")
 	}
-	if app.Tenants() != nil {
-		t.Error("expected nil Tenants before bootstrap")
-	}
 	if app.Search() != nil {
 		t.Error("expected nil Search before bootstrap")
 	}

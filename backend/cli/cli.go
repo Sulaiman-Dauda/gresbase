@@ -200,7 +200,6 @@ func infoCommand(gb *gresbase.Gresbase) *cobra.Command {
 			cmd.Printf("Dev mode:     %v\n", cfg.DevMode)
 			cmd.Printf("Log level:    %s\n", cfg.LogLevel)
 			cmd.Printf("Storage:      %s\n", cfg.StorageBackend)
-			cmd.Printf("Multi-tenant: %v\n", cfg.MultiTenant)
 
 			if gb.App().DB() != nil {
 				if gb.App().DB().IsEmbedded() {
