@@ -123,7 +123,7 @@ func NewWithConfig(cfg *config.Config) *Gresbase {
 	gb.root = &cobra.Command{
 		Use:                "gresbase",
 		Short:              "Gresbase — Modern Backend Platform",
-		Long:               `Gresbase is an open-source backend with embedded PostgreSQL, realtime engine, ACME CA, file storage, and admin dashboard.`,
+		Long:               `Gresbase is an open-source backend with embedded PostgreSQL, realtime engine, file storage, and admin dashboard.`,
 		Version:            Version,
 		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		CompletionOptions:  cobra.CompletionOptions{DisableDefaultCmd: true},

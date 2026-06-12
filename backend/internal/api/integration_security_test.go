@@ -187,25 +187,6 @@ func TestSecurity_RealtimeSubscriberFilterApplies(t *testing.T) {
 	}
 }
 
-// TestSecurity_ACMEDisabledByDefault asserts the experimental ACME CA is not
-// reachable unless explicitly enabled.
-func TestSecurity_ACMEDisabledByDefault(t *testing.T) {
-	env := newIntegrationEnv(t)
-
-	resp := doJSONRequest(t, http.MethodGet, env.http.URL+"/api/v1/acme/directory", nil, nil)
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected ACME directory to be 404 when disabled, got %d", resp.StatusCode)
-	}
-	resp.Body.Close()
-
-	env.app.Config().ACMEEnabled = true
-	enabled := doJSONRequest(t, http.MethodGet, env.http.URL+"/api/v1/acme/directory", nil, nil)
-	if enabled.StatusCode != http.StatusOK {
-		t.Fatalf("expected ACME directory to be 200 when enabled, got %d", enabled.StatusCode)
-	}
-	enabled.Body.Close()
-}
-
 // TestSecurity_JSPluginsDisabledByDefault asserts the unsandboxed JS plugin
 // runtime is not reachable unless explicitly enabled.
 func TestSecurity_JSPluginsDisabledByDefault(t *testing.T) {

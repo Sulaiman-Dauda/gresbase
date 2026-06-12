@@ -547,30 +547,6 @@ type JSPluginRequestEvent struct {
 	Priority   int
 }
 
-// CertificateRequestEvent is fired for certificate issue/revoke requests.
-type CertificateRequestEvent struct {
-	BaseEvent
-	App           interface{}
-	Request       *http.Request
-	Info          *HTTPRequestInfo
-	Action        string
-	CertificateID string
-	Domain        string
-}
-
-// ACMERequestEvent is fired for ACME API requests.
-type ACMERequestEvent struct {
-	BaseEvent
-	App      interface{}
-	Request  *http.Request
-	Info     *HTTPRequestInfo
-	Action   string
-	OrderID  string
-	Token    string
-	Data     map[string]any
-	Resource string
-}
-
 // -------------------------------------------------------------------
 // Collection events
 // -------------------------------------------------------------------
@@ -748,14 +724,6 @@ func (e *JobRequestEvent) EventTags() []string {
 
 func (e *JSPluginRequestEvent) EventTags() []string {
 	return uniqueNonEmpty([]string{"jsplugins:" + e.Action, e.PluginID, e.Name})
-}
-
-func (e *CertificateRequestEvent) EventTags() []string {
-	return uniqueNonEmpty([]string{"certificates:" + e.Action, e.CertificateID, e.Domain})
-}
-
-func (e *ACMERequestEvent) EventTags() []string {
-	return uniqueNonEmpty([]string{"acme:" + e.Action, e.OrderID, e.Token, e.Resource})
 }
 
 func requestCollectionTags(action, collectionID, collectionName, recordID string) []string {

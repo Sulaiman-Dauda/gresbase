@@ -228,8 +228,6 @@ func TestTagFromRoute(t *testing.T) {
 		{"/api/v1/files/a/b/c", "Files"},
 		{"/api/v1/realtime", "Realtime"},
 		{"/api/v1/sse", "Realtime"},
-		{"/api/v1/acme/directory", "ACME"},
-		{"/api/v1/certificates", "Certificates"},
 		{"/api/v1/settings", "Settings"},
 		{"/api/v1/logs", "Logs"},
 		{"/api/v1/api-keys", "API Keys"},

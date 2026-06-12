@@ -74,8 +74,8 @@ func TestNew(t *testing.T) {
 	if app.OnAdminUserRequest() == nil || app.OnCollectionRequest() == nil || app.OnBackupListRequest() == nil || app.OnBackupDeleteRequest() == nil {
 		t.Error("expected broader request hooks to be initialized")
 	}
-	if app.OnRealtimeRequest() == nil || app.OnACMERequest() == nil {
-		t.Error("expected realtime and ACME request hooks to be initialized")
+	if app.OnRealtimeRequest() == nil {
+		t.Error("expected realtime request hook to be initialized")
 	}
 }
 
@@ -113,9 +113,6 @@ func TestApp_AccessorsBeforeBootstrap(t *testing.T) {
 	}
 	if app.Storage() != nil {
 		t.Error("expected nil Storage before bootstrap")
-	}
-	if app.ACME() != nil {
-		t.Error("expected nil ACME before bootstrap")
 	}
 	if app.Realtime() != nil {
 		t.Error("expected nil Realtime before bootstrap")
@@ -182,16 +179,6 @@ func TestApp_CreateAdminWithoutBootstrap(t *testing.T) {
 	err := app.CreateAdmin("admin@test.com", "password")
 	if err == nil {
 		t.Fatal("expected error creating admin without bootstrap")
-	}
-}
-
-func TestApp_IssueCertificateWithoutBootstrap(t *testing.T) {
-	cfg := &config.Config{Addr: ":8080", LogLevel: "info"}
-	app, _ := New(cfg)
-
-	err := app.IssueCertificate("example.com")
-	if err == nil {
-		t.Fatal("expected error issuing certificate without bootstrap")
 	}
 }
 

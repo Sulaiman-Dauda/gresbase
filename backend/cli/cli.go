@@ -19,7 +19,6 @@ func Execute() error {
 	app.Root().AddCommand(superuserCommand(app))
 	app.Root().AddCommand(migrateCommand(app))
 	app.Root().AddCommand(migrationsCommand(app))
-	app.Root().AddCommand(certCommand(app))
 	app.Root().AddCommand(backupCommand(app))
 	app.Root().AddCommand(infoCommand(app))
 	app.Root().AddCommand(typesCommand(app))
@@ -123,80 +122,6 @@ func migrateCommand(gb *gresbase.Gresbase) *cobra.Command {
 	return cmd
 }
 
-func certCommand(gb *gresbase.Gresbase) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "cert",
-		Short: "TLS certificate management",
-	}
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "issue [domain]",
-		Short: "Issue a certificate for a domain",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := gb.Bootstrap(); err != nil {
-				return err
-			}
-			return gb.App().IssueCertificate(args[0])
-		},
-	})
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "list",
-		Short: "List all certificates",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := gb.Bootstrap(); err != nil {
-				return err
-			}
-			certs, err := gb.App().ACME().ListCertificates(cmd.Context(), "default")
-			if err != nil {
-				return err
-			}
-			for _, c := range certs {
-				cmd.Printf("%s  %s  %s  %s\n", c.ID, c.Domain, c.Status, c.NotAfter.Format("2006-01-02"))
-			}
-			return nil
-		},
-	})
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "renew",
-		Short: "Renew expiring certificates",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := gb.Bootstrap(); err != nil {
-				return err
-			}
-			return gb.App().ACME().AutoRenew(cmd.Context())
-		},
-	})
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "revoke [id]",
-		Short: "Revoke a certificate",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := gb.Bootstrap(); err != nil {
-				return err
-			}
-			return gb.App().ACME().RevokeCertificate(cmd.Context(), args[0])
-		},
-	})
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "ca",
-		Short: "Export the internal CA certificate",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := gb.Bootstrap(); err != nil {
-				return err
-			}
-			cmd.Println(string(gb.App().ACME().CAPEM()))
-			return nil
-		},
-	})
-
-	return cmd
-}
-
 func backupCommand(gb *gresbase.Gresbase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "backup",
@@ -275,7 +200,6 @@ func infoCommand(gb *gresbase.Gresbase) *cobra.Command {
 			cmd.Printf("Dev mode:     %v\n", cfg.DevMode)
 			cmd.Printf("Log level:    %s\n", cfg.LogLevel)
 			cmd.Printf("Storage:      %s\n", cfg.StorageBackend)
-			cmd.Printf("ACME:         %v\n", cfg.ACMEEnabled)
 			cmd.Printf("Multi-tenant: %v\n", cfg.MultiTenant)
 
 			if gb.App().DB() != nil {

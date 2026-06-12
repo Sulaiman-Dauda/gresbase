@@ -310,7 +310,6 @@ const fallbackUI = `<!DOCTYPE html>
       <a onclick="navigate('collections')" data-nav="collections">🗄️ Collections</a>
       <a onclick="navigate('admins')" data-nav="admins">👥 Admins</a>
       <a onclick="navigate('api-keys')" data-nav="api-keys">🔑 API Keys</a>
-      <a onclick="navigate('certificates')" data-nav="certificates">🔒 Certificates</a>
       <a onclick="navigate('settings')" data-nav="settings">⚙️ Settings</a>
       <a onclick="navigate('api')" data-nav="api">📖 API Reference</a>
     </nav>
@@ -396,12 +395,6 @@ const fallbackUI = `<!DOCTYPE html>
       <div id="newApiKeyDisplay" class="hidden card success"><p class="text-sm">⚠️ Copy this key now. You won't see it again.</p><code class="inline-code" id="newApiKeyValue" style="word-break:break-all"></code></div>
       <div class="table-wrap"><table><thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th></th></tr></thead><tbody id="apiKeysBody"></tbody></table></div>
     </div>
-    <!-- CERTIFICATES -->
-    <div id="page-certificates" class="hidden">
-      <div class="page-header"><h1>Certificates</h1><p>Manage TLS certificates via internal ACME CA</p></div>
-      <div class="card mb-4"><div class="flex gap-2"><input id="certDomain" placeholder="example.com" style="flex:1"><button class="btn-sm" onclick="issueCertificate()">Issue Certificate</button></div></div>
-      <div class="table-wrap"><table><thead><tr><th>Domain</th><th>Status</th><th>Issuer</th><th>Expires</th><th></th></tr></thead><tbody id="certsBody"></tbody></table></div>
-    </div>
     <!-- SETTINGS -->
     <div id="page-settings" class="hidden">
       <div class="page-header"><h1>Settings</h1><p>Application configuration</p></div>
@@ -440,7 +433,6 @@ const fallbackUI = `<!DOCTYPE html>
         <div class="endpoint-card" onclick="quickAPI('GET','/logs')"><span class="badge success" style="font-size:10px">GET</span> /logs</div>
         <div class="endpoint-card" onclick="quickAPI('GET','/settings')"><span class="badge success" style="font-size:10px">GET</span> /settings</div>
         <div class="endpoint-card" onclick="quickAPI('GET','/api-keys')"><span class="badge success" style="font-size:10px">GET</span> /api-keys</div>
-        <div class="endpoint-card" onclick="quickAPI('GET','/certificates')"><span class="badge success" style="font-size:10px">GET</span> /certificates</div>
         <div class="endpoint-card" onclick="quickAPI('GET','/backups')"><span class="badge success" style="font-size:10px">GET</span> /backups</div>
         <div class="endpoint-card" onclick="quickAPI('GET','/openapi.json')"><span class="badge success" style="font-size:10px">GET</span> /openapi.json</div>
         <div class="endpoint-card" onclick="quickAPI('GET','/metrics')"><span class="badge success" style="font-size:10px">GET</span> /metrics</div>
@@ -526,7 +518,6 @@ function navigate(page) {
   if (page === 'collections') loadCollections();
   if (page === 'admins') loadAdmins();
   if (page === 'api-keys') loadApiKeys();
-  if (page === 'certificates') loadCertificates();
   if (page === 'settings') loadSettings();
   if (page === 'api') document.getElementById('baseUrlDisplay').textContent = window.location.origin + API;
 }
@@ -812,31 +803,6 @@ async function createApiKey() {
 async function deleteApiKey(id) {
   if (!confirm('Revoke this API key?')) return;
   try { await api('/api-keys/' + id, { method: 'DELETE' }); toast('Revoked', 'success'); loadApiKeys(); }
-  catch(e) { toast(e.message, 'error'); }
-}
-
-// ─── CERTIFICATES ──────────────────────────
-async function loadCertificates() {
-  try {
-    const certs = await api('/certificates');
-    document.getElementById('certsBody').innerHTML = (Array.isArray(certs) ? certs : []).map(c =>
-      '<tr><td><strong>' + c.domain + '</strong></td><td><span class="badge ' + (c.status === 'active' ? 'success' : 'danger') + '">' + c.status + '</span></td><td class="text-sm">' + (c.issuer || 'Gresbase CA') + '</td><td class="text-sm">' + (c.not_after ? new Date(c.not_after).toLocaleDateString() : '-') + '</td><td><button class="btn-danger" onclick="revokeCert(\'' + c.id + '\')">Revoke</button></td></tr>'
-    ).join('') || '<tr><td colspan="5" class="text-sm" style="padding:20px">No certificates</td></tr>';
-  } catch(e) { toast(e.message, 'error'); }
-}
-async function issueCertificate() {
-  const domain = document.getElementById('certDomain').value.trim();
-  if (!domain) return toast('Domain required', 'error');
-  try {
-    await api('/certificates/issue', { method: 'POST', body: JSON.stringify({domain}) });
-    toast('Certificate issued for ' + domain + '!', 'success');
-    document.getElementById('certDomain').value = '';
-    loadCertificates();
-  } catch(e) { toast(e.message, 'error'); }
-}
-async function revokeCert(id) {
-  if (!confirm('Revoke this certificate?')) return;
-  try { await api('/certificates/' + id, { method: 'DELETE' }); toast('Revoked', 'success'); loadCertificates(); }
   catch(e) { toast(e.message, 'error'); }
 }
 

@@ -974,33 +974,6 @@ func TestIntegration_AuditLogsPersistAfterCommitOperations(t *testing.T) {
 	}
 }
 
-func TestIntegration_ACMERequestHookFiresOnNewAccount(t *testing.T) {
-	env := newIntegrationEnv(t)
-	env.app.Config().ACMEEnabled = true
-	called := false
-	env.app.OnACMERequest().BindFunc(func(e events.Event) error {
-		acmeEvent, ok := e.(*events.ACMERequestEvent)
-		if ok && acmeEvent.Action == "new_account" {
-			called = true
-		}
-		return e.Next()
-	})
-
-	resp := doJSONRequest(t, http.MethodPost, env.http.URL+"/api/v1/acme/new-account", map[string]any{
-		"contact":              []string{"mailto:admin@example.com"},
-		"termsOfServiceAgreed": true,
-	}, nil)
-	if resp.StatusCode != http.StatusCreated {
-		var body map[string]any
-		readJSONBody(t, resp, &body)
-		t.Fatalf("acme new-account status = %d body=%v", resp.StatusCode, body)
-	}
-	resp.Body.Close()
-	if !called {
-		t.Fatal("expected ACME request hook to fire")
-	}
-}
-
 func TestIntegration_RealtimeRequestHookCanBlockConnect(t *testing.T) {
 	env := newIntegrationEnv(t)
 	called := false

@@ -3,8 +3,8 @@ package migrations
 import "github.com/gresbase/gresbase/internal/database"
 
 // Migration001 creates the initial Gresbase system tables:
-// tenants, admins, collections, api_keys, audit_logs, certificates,
-// sessions, rate_limits, acme_accounts, external_auths, OTP, magic links,
+// tenants, admins, collections, api_keys, audit_logs,
+// sessions, rate_limits, external_auths, OTP, magic links,
 // password resets, verifications, and email changes.
 var Migration001 = &database.Migration{
 	Name: "1749000000_initial_schema",
@@ -81,23 +81,6 @@ CREATE TABLE IF NOT EXISTS _audit_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON _audit_logs(created_at);
 
-CREATE TABLE IF NOT EXISTS _certificates (
-    id              TEXT PRIMARY KEY,
-    tenant_id       TEXT REFERENCES _tenants(id) ON DELETE CASCADE,
-    domain          TEXT NOT NULL,
-    certificate     TEXT NOT NULL,
-    private_key     TEXT NOT NULL DEFAULT '',
-    issuer          TEXT DEFAULT '',
-    not_before      TIMESTAMPTZ,
-    not_after       TIMESTAMPTZ,
-    auto_renew      BOOLEAN DEFAULT TRUE,
-    challenge_type  TEXT DEFAULT 'http-01',
-    status          TEXT DEFAULT 'active',
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_certs_domain ON _certificates(domain);
-
 CREATE TABLE IF NOT EXISTS _sessions (
     id            TEXT PRIMARY KEY,
     admin_id      TEXT REFERENCES _admins(id) ON DELETE CASCADE,
@@ -118,14 +101,6 @@ CREATE TABLE IF NOT EXISTS _rate_limits (
     window_start TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_ratelimit_key ON _rate_limits(key);
-
-CREATE TABLE IF NOT EXISTS _acme_accounts (
-    id          TEXT PRIMARY KEY,
-    contact     JSONB DEFAULT '[]',
-    terms_agreed BOOLEAN DEFAULT FALSE,
-    status      TEXT DEFAULT 'valid',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
 
 CREATE TABLE IF NOT EXISTS _external_auths (
     admin_id    TEXT REFERENCES _admins(id) ON DELETE CASCADE,
@@ -200,8 +175,6 @@ DROP TABLE IF EXISTS _password_resets CASCADE;
 DROP TABLE IF EXISTS _magic_links CASCADE;
 DROP TABLE IF EXISTS _otp CASCADE;
 DROP TABLE IF EXISTS _external_auths CASCADE;
-DROP TABLE IF EXISTS _acme_accounts CASCADE;
-DROP TABLE IF EXISTS _certificates CASCADE;
 DROP TABLE IF EXISTS _audit_logs CASCADE;
 DROP TABLE IF EXISTS _api_keys CASCADE;
 DROP TABLE IF EXISTS _collections CASCADE;

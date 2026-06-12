@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -138,8 +139,6 @@ func (s *Server) mountRoutes() {
 	collectionsRead := mw.RequirePermission("collections.read")
 	collectionsWrite := mw.RequirePermission("collections.write")
 	filesWrite := mw.RequirePermission("files.write")
-	certificatesRead := mw.RequirePermission("certificates.read")
-	certificatesWrite := mw.RequirePermission("certificates.write")
 	settingsRead := mw.RequirePermission("settings.read")
 	settingsWrite := mw.RequirePermission("settings.write")
 	logsRead := mw.RequirePermission("logs.read")
@@ -303,26 +302,6 @@ func (s *Server) mountRoutes() {
 		r.With(mw.OptionalAuth).Post("/realtime/broadcast", h.RealtimeBroadcast)
 		r.With(mw.OptionalAuth).Get("/sse", h.RealtimeSSE)
 
-		// ACME (experimental, disabled unless acme_enabled is set)
-		r.Route("/acme", func(r chi.Router) {
-			r.Use(s.requireACMEEnabled)
-			r.Get("/directory", h.ACMEDirectory)
-			r.Post("/new-account", h.ACMENewAccount)
-			r.Post("/new-order", h.ACMENewOrder)
-			r.Post("/challenge/{id}", h.ACMEChallenge)
-			r.Post("/finalize/{id}", h.ACMEFinalize)
-			r.Get("/cert/{id}", h.ACMECertificate)
-			r.Post("/revoke", h.ACMERevoke)
-		})
-
-		// Certificates
-		r.Route("/certificates", func(r chi.Router) {
-			r.Use(mw.RequireAuth)
-			r.With(admin, certificatesRead).Get("/", h.CertificatesList)
-			r.With(admin, certificatesWrite).Post("/issue", h.CertificatesIssue)
-			r.With(admin, certificatesWrite).Delete("/{id}", h.CertificatesRevoke)
-		})
-
 		// Settings
 		r.Route("/settings", func(r chi.Router) {
 			r.Use(mw.RequireAuth)
@@ -450,10 +429,6 @@ func (s *Server) mountRoutes() {
 			r.Post("/confirm-email-change", h.RecordEmailChangeConfirm)
 		})
 	})
-
-	// ACME HTTP-01 challenge handler at well-known path
-	r.With(s.requireACMEEnabled).Get("/.well-known/acme-challenge/{token}", h.ACMEHTTPChallenge)
-
 	// Fallback UI handler for non-API GET/HEAD requests.
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
@@ -483,18 +458,6 @@ func (s *Server) prometheusMetrics(w http.ResponseWriter, r *http.Request) {
 	s.app.Metrics().PrometheusHandler("0.3.0")(w, r)
 }
 
-// requireACMEEnabled returns 404 for ACME endpoints unless the experimental
-// embedded CA has been explicitly enabled via acme_enabled.
-func (s *Server) requireACMEEnabled(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.app == nil || s.app.Config() == nil || !s.app.Config().ACMEEnabled {
-			writeError(w, http.StatusNotFound, "ACME is disabled")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // requireJSPluginsEnabled returns 404 for the JS plugin endpoints unless the
 // unsandboxed runtime has been explicitly enabled via js_plugins_enabled.
 func (s *Server) requireJSPluginsEnabled(next http.Handler) http.Handler {
@@ -517,24 +480,23 @@ func (s *Server) Start(addr string) error {
 	}
 	handler := s.extensionAwareHandler()
 
-	// TLS with CertMagic auto-cert
-	if cfg.EnableTLS && cfg.Domain != "" {
-		tlsCfg, err := s.app.ACME().GetTLSConfig(context.Background())
-		if err != nil {
-			log.Warn().Err(err).Msg("Internal CA not available, falling back to HTTP")
-		} else {
-			s.srv = &http.Server{
-				Addr:              addr,
-				Handler:           handler,
-				TLSConfig:         tlsCfg,
-				ReadTimeout:       30 * time.Second,
-				WriteTimeout:      0,
-				ReadHeaderTimeout: 10 * time.Second,
-				IdleTimeout:       120 * time.Second,
-			}
-			log.Info().Str("addr", addr).Str("domain", cfg.Domain).Msg("Server starting with TLS")
-			return s.srv.ListenAndServeTLS("", "")
+	// TLS from operator-provided certificate + key files. For automatic
+	// certificate management, terminate TLS at a reverse proxy (Caddy,
+	// nginx, Traefik) — that is the recommended production deployment.
+	if cfg.EnableTLS {
+		if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
+			return fmt.Errorf("enable_tls is set but tls_cert_file/tls_key_file are not configured")
 		}
+		s.srv = &http.Server{
+			Addr:              addr,
+			Handler:           handler,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      0,
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
+		log.Info().Str("addr", addr).Msg("Server starting with TLS")
+		return s.srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
 	}
 
 	// Plain HTTP

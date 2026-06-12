@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gresbase/gresbase/internal/acme"
 	"github.com/gresbase/gresbase/internal/auth"
 	"github.com/gresbase/gresbase/internal/collection"
 	"github.com/gresbase/gresbase/internal/config"
@@ -61,7 +60,6 @@ type App struct {
 	passkeySvc      *auth.PasskeyService
 	collections     *collection.Service
 	storageSvc      *storage.Service
-	acmeService     *acme.Service
 	realtimeHub     *realtime.Hub
 	mailerSvc       *mailer.Service
 	backupSvc       *storage.BackupService
@@ -126,8 +124,6 @@ type App struct {
 	onFTSIndexRequest          *events.Hook
 	onJobRequest               *events.Hook
 	onJSPluginRequest          *events.Hook
-	onCertificateRequest       *events.Hook
-	onACMERequest              *events.Hook
 
 	boundPlugins map[string]struct{}
 	mu           sync.RWMutex
@@ -196,8 +192,6 @@ func New(cfg *config.Config) (*App, error) {
 		onFTSIndexRequest:          events.NewHook(),
 		onJobRequest:               events.NewHook(),
 		onJSPluginRequest:          events.NewHook(),
-		onCertificateRequest:       events.NewHook(),
-		onACMERequest:              events.NewHook(),
 		boundPlugins:               map[string]struct{}{},
 	}
 
@@ -254,11 +248,6 @@ func (app *App) Bootstrap() error {
 	}
 	app.storageSvc = storageSvc
 
-	acmeSvc, err := acme.NewService(app.db, app.cfg)
-	if err != nil {
-		return fmt.Errorf("acme: %w", err)
-	}
-	app.acmeService = acmeSvc
 	app.mailerSvc = mailer.NewService(app.cfg)
 	app.backupSvc = storage.NewBackupService(app.db, app.cfg)
 	app.mfaService = auth.NewMFAService(app.db)
@@ -486,7 +475,6 @@ func (app *App) Serve() error {
 	}
 
 	// Start background tasks
-	go app.startACMEAutoRenewal()
 	if app.jobScheduler != nil {
 		// Re-arm jobs persisted by previous runs; without this, scheduled
 		// jobs silently stop after a restart.
@@ -570,19 +558,6 @@ func (app *App) CreateAdmin(email, password string) error {
 	return nil
 }
 
-// IssueCertificate issues a TLS certificate via the internal ACME CA.
-func (app *App) IssueCertificate(domain string) error {
-	if !app.ready {
-		return fmt.Errorf("not bootstrapped")
-	}
-	cert, err := app.acmeService.IssueForDomain(context.Background(), domain)
-	if err != nil {
-		return fmt.Errorf("certificate: %w", err)
-	}
-	log.Info().Str("domain", cert.Domain).Str("id", cert.ID).Msg("Certificate issued")
-	return nil
-}
-
 // registerBackupJob wires the "system.backup" cron handler: snapshot the
 // database, optionally mirror to S3, prune old snapshots. When backup_cron is
 // configured, a job row is created (or its schedule updated) on boot.
@@ -651,16 +626,6 @@ func (app *App) registerBackupJob() {
 	}
 }
 
-func (app *App) startACMEAutoRenewal() {
-	ticker := time.NewTicker(24 * time.Hour)
-	defer ticker.Stop()
-	for range ticker.C {
-		if err := app.acmeService.AutoRenew(context.Background()); err != nil {
-			log.Error().Err(err).Msg("ACME auto-renewal error")
-		}
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Accessors
 // ---------------------------------------------------------------------------
@@ -671,7 +636,6 @@ func (app *App) Auth() *auth.Service                     { return app.authServic
 func (app *App) OAuth() *auth.OAuthService               { return app.oauthService }
 func (app *App) Collections() *collection.Service        { return app.collections }
 func (app *App) Storage() *storage.Service               { return app.storageSvc }
-func (app *App) ACME() *acme.Service                     { return app.acmeService }
 func (app *App) Realtime() *realtime.Hub                 { return app.realtimeHub }
 func (app *App) Mailer() *mailer.Service                 { return app.mailerSvc }
 func (app *App) Backup() *storage.BackupService          { return app.backupSvc }
@@ -785,8 +749,6 @@ func (app *App) OnSearchRequest() *events.Hook            { return app.onSearchR
 func (app *App) OnFTSIndexRequest() *events.Hook          { return app.onFTSIndexRequest }
 func (app *App) OnJobRequest() *events.Hook               { return app.onJobRequest }
 func (app *App) OnJSPluginRequest() *events.Hook          { return app.onJSPluginRequest }
-func (app *App) OnCertificateRequest() *events.Hook       { return app.onCertificateRequest }
-func (app *App) OnACMERequest() *events.Hook              { return app.onACMERequest }
 
 // ---------------------------------------------------------------------------
 // Internal migrations
@@ -899,10 +861,6 @@ func (app *App) bindPlugin(p *plugin.Plugin) {
 			bind(app.OnJobRequest(), handler)
 		case "onJSPluginRequest":
 			bind(app.OnJSPluginRequest(), handler)
-		case "onCertificateRequest":
-			bind(app.OnCertificateRequest(), handler)
-		case "onACMERequest":
-			bind(app.OnACMERequest(), handler)
 		case "onAuthLogin":
 			bind(app.OnAuthLogin(), handler)
 		case "onAuthRefresh":
@@ -1095,8 +1053,6 @@ func (app *App) wireJSHooks() {
 		{app.OnFTSIndexRequest(), "onFTSIndexRequest"},
 		{app.OnJobRequest(), "onJobRequest"},
 		{app.OnJSPluginRequest(), "onJSPluginRequest"},
-		{app.OnCertificateRequest(), "onCertificateRequest"},
-		{app.OnACMERequest(), "onACMERequest"},
 	}
 	for _, item := range requestHooks {
 		hookName := item.name

@@ -372,21 +372,6 @@ func (f *BackupCreateForm) Validate() error {
 	return nil
 }
 
-// DomainForm validates single-domain payloads.
-type DomainForm struct {
-	Domain string `json:"domain"`
-}
-
-func (f *DomainForm) Validate() error {
-	if strings.TrimSpace(f.Domain) == "" {
-		return Errors{"domain": "domain is required"}
-	}
-	if strings.ContainsAny(f.Domain, " /\\") {
-		return Errors{"domain": "domain must not contain spaces or slashes"}
-	}
-	return nil
-}
-
 // OAuthCallbackForm validates OAuth callback query params.
 type OAuthCallbackForm struct {
 	Code  string `json:"code"`
@@ -637,73 +622,6 @@ func (f *RecordAuthPasswordForm) Validate() error {
 	}
 	if errs.HasAny() {
 		return errs
-	}
-	return nil
-}
-
-// ACMEAccountForm validates ACME account creation requests.
-type ACMEAccountForm struct {
-	Contact     []string `json:"contact"`
-	TermsAgreed bool     `json:"termsOfServiceAgreed"`
-}
-
-func (f *ACMEAccountForm) Validate() error {
-	if !f.TermsAgreed {
-		return Errors{"termsOfServiceAgreed": "termsOfServiceAgreed must be true"}
-	}
-	return nil
-}
-
-// ACMEIdentifierForm validates a single ACME identifier.
-type ACMEIdentifierForm struct {
-	Type  string `json:"type"`
-	Value string `json:"value"`
-}
-
-// ACMEOrderForm validates ACME order requests.
-type ACMEOrderForm struct {
-	Identifiers []ACMEIdentifierForm `json:"identifiers"`
-}
-
-func (f *ACMEOrderForm) Validate() error {
-	errs := Errors{}
-	if len(f.Identifiers) == 0 {
-		errs.Add("identifiers", "identifiers are required")
-	}
-	for i, ident := range f.Identifiers {
-		if strings.TrimSpace(ident.Type) == "" {
-			errs.Add(fmt.Sprintf("identifiers.%d.type", i), "type is required")
-		}
-		if strings.TrimSpace(ident.Value) == "" {
-			errs.Add(fmt.Sprintf("identifiers.%d.value", i), "value is required")
-		}
-	}
-	if errs.HasAny() {
-		return errs
-	}
-	return nil
-}
-
-// ACMEFinalizeForm validates ACME finalize requests.
-type ACMEFinalizeForm struct {
-	CSR string `json:"csr"`
-}
-
-func (f *ACMEFinalizeForm) Validate() error {
-	if strings.TrimSpace(f.CSR) == "" {
-		return Errors{"csr": "csr is required"}
-	}
-	return nil
-}
-
-// ACMERevokeForm validates ACME revoke requests.
-type ACMERevokeForm struct {
-	CertificateID string `json:"certificateId"`
-}
-
-func (f *ACMERevokeForm) Validate() error {
-	if strings.TrimSpace(f.CertificateID) == "" {
-		return Errors{"certificateId": "certificateId is required"}
 	}
 	return nil
 }

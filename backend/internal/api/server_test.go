@@ -318,23 +318,3 @@ func TestRecordCRUDRequestFormat(t *testing.T) {
 
 	_ = req
 }
-
-func TestACMEDirectoryResponse(t *testing.T) {
-	directory := map[string]string{
-		"newNonce":   "http://localhost:8080/api/v1/acme/new-nonce",
-		"newAccount": "http://localhost:8080/api/v1/acme/new-account",
-		"newOrder":   "http://localhost:8080/api/v1/acme/new-order",
-		"revokeCert": "http://localhost:8080/api/v1/acme/revoke",
-		"keyChange":  "http://localhost:8080/api/v1/acme/key-change",
-	}
-
-	if directory["newNonce"] == "" {
-		t.Error("newNonce endpoint should not be empty")
-	}
-	if directory["newOrder"] == "" {
-		t.Error("newOrder endpoint should not be empty")
-	}
-	if len(directory) != 5 {
-		t.Errorf("Expected 5 ACME endpoints, got %d", len(directory))
-	}
-}

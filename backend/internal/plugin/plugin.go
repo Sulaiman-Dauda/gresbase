@@ -407,15 +407,6 @@ func LoadBuiltinPlugins() []*Plugin {
 			Hooks:       map[string]events.Handler{},
 		},
 		{
-			ID:          "gresbase.acme",
-			Name:        "ACME CA",
-			Version:     "0.1.0",
-			Description: "Embedded ACME-compatible Certificate Authority",
-			Enabled:     true,
-			Priority:    events.PriorityDefault,
-			Hooks:       map[string]events.Handler{},
-		},
-		{
 			ID:          "gresbase.jobs",
 			Name:        "Job Scheduler",
 			Version:     "0.1.0",

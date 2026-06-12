@@ -100,7 +100,7 @@ func (h *Handlers) Features(w http.ResponseWriter, r *http.Request) {
 		"vector":        vector,
 		"realtime":      true,
 		"oauth":         h.app.OAuth() != nil,
-		"acme":          h.app.Config() != nil && h.app.Config().ACMEEnabled,
+		"tls":           h.app.Config() != nil && h.app.Config().EnableTLS,
 		"embeddedDB":    h.app.DB() != nil && h.app.DB().IsEmbedded(),
 		"typedSDK":      true,
 		"ruleSimulator": true,

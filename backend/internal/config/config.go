@@ -15,11 +15,16 @@ import (
 // Config holds all configuration for the Gresbase platform.
 type Config struct {
 	// Server
-	Addr      string `mapstructure:"addr"`
-	Domain    string `mapstructure:"domain"`
-	EnableTLS bool   `mapstructure:"enable_tls"`
-	CertEmail string `mapstructure:"cert_email"`
-	DataDir   string `mapstructure:"data_dir"`
+	Addr string `mapstructure:"addr"`
+	// Domain is the public base URL (used for email links and the WebAuthn
+	// relying party), e.g. https://app.example.com.
+	Domain string `mapstructure:"domain"`
+	// EnableTLS serves HTTPS directly from operator-provided cert/key files.
+	// For automatic certificates, terminate TLS at a reverse proxy instead.
+	EnableTLS   bool   `mapstructure:"enable_tls"`
+	TLSCertFile string `mapstructure:"tls_cert_file"`
+	TLSKeyFile  string `mapstructure:"tls_key_file"`
+	DataDir     string `mapstructure:"data_dir"`
 
 	// HTTP security / CORS
 	CORSAllowedOrigins   []string `mapstructure:"cors_allowed_origins"`
@@ -55,10 +60,6 @@ type Config struct {
 	S3AccessKey    string `mapstructure:"s3_access_key"`
 	S3SecretKey    string `mapstructure:"s3_secret_key"`
 	S3UseSSL       bool   `mapstructure:"s3_use_ssl"`
-
-	// ACME
-	ACMECacheDir string `mapstructure:"acme_cache_dir"`
-	ACMEEnabled  bool   `mapstructure:"acme_enabled"`
 
 	// JSPluginsEnabled gates the in-process JavaScript plugin runtime. It is
 	// OFF by default: the runtime is not sandboxed, so it must be opted into
@@ -199,7 +200,6 @@ func DefaultConfig() *Config {
 		AdminTokenExpiry:         24 * time.Hour,
 		StorageBackend:           "local",
 		StorageLocal:             "./storage",
-		ACMECacheDir:             "./.certmagic",
 		RealtimeMaxConnections:   10000,
 		RealtimeIdleTimeout:      5 * time.Minute,
 		RealtimeMaxMessageSize:   65536,
@@ -247,6 +247,8 @@ func Load() *Config {
 	viper.BindEnv("addr", "ADDR")
 	viper.BindEnv("domain", "DOMAIN")
 	viper.BindEnv("enable_tls", "ENABLE_TLS")
+	viper.BindEnv("tls_cert_file", "TLS_CERT_FILE")
+	viper.BindEnv("tls_key_file", "TLS_KEY_FILE")
 	viper.BindEnv("data_dir", "DATA_DIR")
 	viper.BindEnv("cors_allow_credentials", "CORS_ALLOW_CREDENTIALS")
 	viper.BindEnv("cors_allowed_origins", "CORS_ALLOWED_ORIGINS")
@@ -475,6 +477,6 @@ func (c *Config) String() string {
 	if c.DatabaseURL == "" {
 		dbMode = "embedded"
 	}
-	return fmt.Sprintf("addr=%s db=%s storage=%s acme=%v dev=%v",
-		c.Addr, dbMode, c.StorageBackend, c.ACMEEnabled, c.DevMode)
+	return fmt.Sprintf("addr=%s db=%s storage=%s tls=%v dev=%v",
+		c.Addr, dbMode, c.StorageBackend, c.EnableTLS, c.DevMode)
 }

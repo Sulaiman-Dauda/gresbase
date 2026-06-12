@@ -164,8 +164,6 @@ func Generate(version string, baseURL string, routes []RouteDef) *Spec {
 			{Name: "Record Auth", Description: "End-user authentication for auth collections"},
 			{Name: "Files", Description: "File upload & download"},
 			{Name: "Realtime", Description: "SSE/WebSocket realtime subscriptions"},
-			{Name: "ACME", Description: "ACME certificate management"},
-			{Name: "Certificates", Description: "TLS certificate management"},
 			{Name: "Settings", Description: "Application settings"},
 			{Name: "Logs", Description: "Audit log management"},
 			{Name: "API Keys", Description: "API key management"},
@@ -400,8 +398,6 @@ func routeHasRequestBody(method, route string) bool {
 			return false
 		case strings.HasSuffix(route, "/restore"):
 			return false
-		case strings.Contains(route, "/acme/challenge/"):
-			return false
 		default:
 			return true
 		}
@@ -478,7 +474,7 @@ func responseSchemaForRoute(method, route string) *Schema {
 			"path":          {Type: "string"},
 			"original_name": {Type: "string"},
 		}}
-	case (strings.HasPrefix(route, "/api/v1/files/") && method == http.MethodGet) || strings.Contains(route, "/download") || strings.Contains(route, "/api/v1/acme/cert/"):
+	case (strings.HasPrefix(route, "/api/v1/files/") && method == http.MethodGet) || strings.Contains(route, "/download"):
 		return &Schema{Type: "string", Format: "binary"}
 	default:
 		return &Schema{Type: "object"}
@@ -491,8 +487,6 @@ func responseContentTypeForRoute(method, route string) string {
 		return "application/octet-stream"
 	case strings.Contains(route, "/backups/") && strings.Contains(route, "/download"):
 		return "application/octet-stream"
-	case strings.Contains(route, "/api/v1/acme/cert/"):
-		return "application/pem-certificate-chain"
 	default:
 		return "application/json"
 	}
@@ -512,10 +506,7 @@ func successStatusForRoute(method, route string) string {
 		"/api/v1/api-keys/",
 		"/api/v1/backups/",
 		"/api/v1/plugins/js/",
-		"/api/v1/jobs/",
-		"/api/v1/certificates/issue",
-		"/api/v1/acme/new-account",
-		"/api/v1/acme/new-order":
+		"/api/v1/jobs/":
 		return "201"
 	default:
 		return "200"
@@ -633,10 +624,6 @@ func tagFromRoute(route string) string {
 		return "Files"
 	case strings.Contains(route, "realtime") || strings.Contains(route, "sse"):
 		return "Realtime"
-	case strings.Contains(route, "acme"):
-		return "ACME"
-	case strings.Contains(route, "certificates"):
-		return "Certificates"
 	case strings.Contains(route, "settings"):
 		return "Settings"
 	case strings.Contains(route, "logs"):

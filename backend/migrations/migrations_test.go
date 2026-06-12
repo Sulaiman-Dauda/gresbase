@@ -79,7 +79,7 @@ func TestMigration001Content(t *testing.T) {
 
 	// Verify key tables are in the Up migration
 	expectedTables := []string{"_tenants", "_admins", "_collections", "_api_keys",
-		"_audit_logs", "_certificates", "_sessions", "_external_auths", "_otp",
+		"_audit_logs", "_sessions", "_external_auths", "_otp",
 		"_magic_links", "_password_resets", "_verifications", "_email_changes"}
 
 	for _, table := range expectedTables {
