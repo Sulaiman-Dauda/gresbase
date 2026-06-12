@@ -61,14 +61,10 @@ type Config struct {
 	S3SecretKey    string `mapstructure:"s3_secret_key"`
 	S3UseSSL       bool   `mapstructure:"s3_use_ssl"`
 
-	// JSPluginsEnabled gates the in-process JavaScript plugin runtime. It is
-	// OFF by default: the runtime is not sandboxed, so it must be opted into
-	// explicitly and treated as trusted code.
-	JSPluginsEnabled bool `mapstructure:"js_plugins_enabled"`
-
 	// HooksDir is a directory of *.js hook files loaded at boot (PocketBase
-	// pb_hooks-style). File hooks run regardless of JSPluginsEnabled: writing
-	// to the server's filesystem already implies full trust. Empty disables.
+	// pb_hooks-style). Placing files next to the binary already implies full
+	// trust (same model as Go hooks), so the runtime runs them unsandboxed.
+	// Empty disables.
 	HooksDir string `mapstructure:"hooks_dir"`
 	// HooksWatch hot-reloads the hooks directory on file changes.
 	HooksWatch bool `mapstructure:"hooks_watch"`

@@ -189,33 +189,6 @@ func (r *Runtime) TriggerHook(hookName string, eventJSON []byte) error {
 	return nil
 }
 
-// Execute runs a JS expression in the plugin context.
-func (r *Runtime) Execute(pluginID, expr string) (goja.Value, error) {
-	r.mu.RLock()
-	p, ok := r.plugins[pluginID]
-	r.mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("plugin not found: %s", pluginID)
-	}
-
-	vm := goja.New()
-	p.setupRuntime(r, vm)
-
-	_, err := vm.RunProgram(p.compiled)
-	if err != nil {
-		return nil, err
-	}
-
-	var result goja.Value
-	err = r.runWithTimeout(vm, func() error {
-		res, evalErr := vm.RunString(expr)
-		result = res
-		return evalErr
-	})
-
-	return result, err
-}
-
 // ListPlugins returns all loaded JS plugins.
 func (r *Runtime) ListPlugins() []map[string]any {
 	r.mu.RLock()
@@ -237,17 +210,6 @@ func (r *Runtime) ListPlugins() []map[string]any {
 		})
 	}
 	return list
-}
-
-// GetPluginScript returns the source of a plugin.
-func (r *Runtime) GetPluginScript(id string) (string, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	p, ok := r.plugins[id]
-	if !ok {
-		return "", fmt.Errorf("plugin not found: %s", id)
-	}
-	return p.Script, nil
 }
 
 // setupRuntime initializes the full Gresbase JS API on the VM.
@@ -852,97 +814,6 @@ func jsConsoleDebug(call goja.FunctionCall) goja.Value {
 // ToJSON marshals an event to JSON for passing to JS hooks.
 func ToJSON(e events.Event) ([]byte, error) {
 	return json.Marshal(e)
-}
-
-// ---------------------------------------------------------------------------
-// Built-in JS plugin templates
-// ---------------------------------------------------------------------------
-
-// BuiltinPlugins returns example JS plugins shipped with Gresbase.
-func BuiltinPlugins() map[string]string {
-	return map[string]string{
-		"example-validator": strings.TrimSpace(`
-// Example validation plugin
-registerHook("onRecordCreate", function(e) {
-    console.log("Validating new record:", JSON.stringify(e));
-
-    if (e.record && e.record.title === "") {
-        throw new Error("Title cannot be empty");
-    }
-    return e;
-});
-
-registerHook("onRecordUpdate", function(e) {
-    console.log("Record updated:", e.recordId);
-    return e;
-});
-`),
-		"example-audit-logger": strings.TrimSpace(`
-// Audit logger plugin - logs all record operations
-registerHook("onRecordCreate", function(e) {
-    console.log("[AUDIT] Record created in collection:", e.collectionId);
-    return e;
-});
-
-registerHook("onRecordDelete", function(e) {
-    console.log("[AUDIT] Record deleted:", e.recordId, "from", e.collectionId);
-    return e;
-});
-
-registerHook("onAuthLogin", function(e) {
-    console.log("[AUDIT] User logged in via", e.provider);
-    return e;
-});
-`),
-		"example-email-notifier": strings.TrimSpace(`
-// Email notification plugin using the built-in $app API
-registerHook("onRecordCreate", function(e) {
-    if (e.collectionId === "comments") {
-        // Fetch the related post
-        var post = $app.findRecordById("posts", e.record.post);
-        if (post && post.author_email) {
-            $app.sendMail(
-                post.author_email,
-                "New comment on your post",
-                "<p>Someone commented on your post: <strong>" + e.record.body + "</strong></p>"
-            );
-            console.log("Notification sent to", post.author_email);
-        }
-    }
-    return e;
-});
-
-registerHook("onAuthLogin", function(e) {
-    console.log("User logged in:", e.userId, "via", e.provider);
-    return e;
-});
-`),
-		"example-data-enrichment": strings.TrimSpace(`
-// Enrich records with external API data
-registerHook("onRecordCreate", function(e) {
-    if (e.collectionId === "profiles" && e.record.github_username) {
-        try {
-            var resp = $http.get("https://api.github.com/users/" + e.record.github_username);
-            if (resp.status === 200) {
-                var data = JSON.parse(resp.body);
-                $app.db()
-                    .update("profiles")
-                    .set({
-                        github_avatar: data.avatar_url,
-                        github_bio: data.bio,
-                        github_repos: data.public_repos
-                    })
-                    .where("id = ?", e.record.id)
-                    .exec();
-            }
-        } catch (err) {
-            console.error("Failed to fetch GitHub data:", err.message);
-        }
-    }
-    return e;
-});
-`),
-	}
 }
 
 func generateUUID() string {

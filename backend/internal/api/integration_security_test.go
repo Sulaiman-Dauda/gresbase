@@ -187,19 +187,6 @@ func TestSecurity_RealtimeSubscriberFilterApplies(t *testing.T) {
 	}
 }
 
-// TestSecurity_JSPluginsDisabledByDefault asserts the unsandboxed JS plugin
-// runtime is not reachable unless explicitly enabled.
-func TestSecurity_JSPluginsDisabledByDefault(t *testing.T) {
-	env := newIntegrationEnv(t)
-	adminToken := env.createAdminToken(t)
-
-	resp := doJSONRequest(t, http.MethodGet, env.http.URL+"/api/v1/plugins/js", nil, map[string]string{"Authorization": "Bearer " + adminToken})
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected JS plugin routes to be 404 when disabled, got %d", resp.StatusCode)
-	}
-	resp.Body.Close()
-}
-
 // TestSecurity_FileDownloadHonorsViewRule asserts the file endpoint applies
 // the owning collection's view rule.
 func TestSecurity_FileDownloadHonorsViewRule(t *testing.T) {

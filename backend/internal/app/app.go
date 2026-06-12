@@ -123,7 +123,6 @@ type App struct {
 	onSearchRequest            *events.Hook
 	onFTSIndexRequest          *events.Hook
 	onJobRequest               *events.Hook
-	onJSPluginRequest          *events.Hook
 
 	boundPlugins map[string]struct{}
 	mu           sync.RWMutex
@@ -191,7 +190,6 @@ func New(cfg *config.Config) (*App, error) {
 		onSearchRequest:            events.NewHook(),
 		onFTSIndexRequest:          events.NewHook(),
 		onJobRequest:               events.NewHook(),
-		onJSPluginRequest:          events.NewHook(),
 		boundPlugins:               map[string]struct{}{},
 	}
 
@@ -275,21 +273,11 @@ func (app *App) Bootstrap() error {
 	}
 	app.registerBackupJob()
 
-	// 2d. JS plugin runtime — OFF by default. The goja runtime runs in-process
-	// without a sandbox, so it is only activated when explicitly enabled.
+	// 2d. File-based JS hooks (PocketBase pb_hooks-style). The goja runtime
+	// only ever executes *.js files placed next to the binary — placing files
+	// on the server's filesystem already implies full trust (same model as Go
+	// hooks), so there is no separate enable flag. Disable with HOOKS_DIR="".
 	app.jsRuntime = jsplugin.NewRuntime(30 * time.Second)
-	if app.cfg.JSPluginsEnabled {
-		for id, script := range jsplugin.BuiltinPlugins() {
-			if _, err := app.jsRuntime.LoadPlugin(id, id, script, 0); err != nil {
-				log.Warn().Err(err).Str("plugin", id).Msg("Failed to load builtin JS plugin")
-			}
-		}
-		log.Info().Msg("JavaScript plugin runtime enabled (unsandboxed — trusted code only)")
-	}
-
-	// 2d-2. File-based JS hooks (PocketBase pb_hooks-style). These load even
-	// without JSPluginsEnabled: the ability to place files next to the binary
-	// is the trust boundary, same as PocketBase. Disable with HOOKS_DIR="".
 	hooksLoaded := 0
 	if dir := app.cfg.HooksDir; dir != "" {
 		n, err := app.jsRuntime.LoadHooksDir(dir)
@@ -306,8 +294,8 @@ func (app *App) Bootstrap() error {
 		}
 	}
 
-	// Wire JS hooks to Go event hooks when any JS execution path is active.
-	if app.cfg.JSPluginsEnabled || app.cfg.HooksDir != "" || hooksLoaded > 0 {
+	// Wire JS hooks to Go event hooks when file hooks are present.
+	if app.cfg.HooksDir != "" || hooksLoaded > 0 {
 		app.wireJSHooks()
 	}
 
@@ -748,7 +736,6 @@ func (app *App) OnAPIKeyRequest() *events.Hook            { return app.onAPIKeyR
 func (app *App) OnSearchRequest() *events.Hook            { return app.onSearchRequest }
 func (app *App) OnFTSIndexRequest() *events.Hook          { return app.onFTSIndexRequest }
 func (app *App) OnJobRequest() *events.Hook               { return app.onJobRequest }
-func (app *App) OnJSPluginRequest() *events.Hook          { return app.onJSPluginRequest }
 
 // ---------------------------------------------------------------------------
 // Internal migrations
@@ -859,8 +846,6 @@ func (app *App) bindPlugin(p *plugin.Plugin) {
 			bind(app.OnFTSIndexRequest(), handler)
 		case "onJobRequest":
 			bind(app.OnJobRequest(), handler)
-		case "onJSPluginRequest":
-			bind(app.OnJSPluginRequest(), handler)
 		case "onAuthLogin":
 			bind(app.OnAuthLogin(), handler)
 		case "onAuthRefresh":
@@ -1052,7 +1037,6 @@ func (app *App) wireJSHooks() {
 		{app.OnSearchRequest(), "onSearchRequest"},
 		{app.OnFTSIndexRequest(), "onFTSIndexRequest"},
 		{app.OnJobRequest(), "onJobRequest"},
-		{app.OnJSPluginRequest(), "onJSPluginRequest"},
 	}
 	for _, item := range requestHooks {
 		hookName := item.name

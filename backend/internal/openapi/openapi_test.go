@@ -234,7 +234,6 @@ func TestTagFromRoute(t *testing.T) {
 		{"/api/v1/backups", "Backups"},
 		{"/api/v1/search", "Search"},
 		{"/api/v1/jobs", "Jobs"},
-		{"/api/v1/plugins", "Plugins"},
 		{"/api/v1/unknown", "General"},
 	}
 

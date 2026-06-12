@@ -182,18 +182,6 @@ func TestSettingsUpdateFormEmailTemplates(t *testing.T) {
 	}
 }
 
-func TestJSPluginFormsValidate(t *testing.T) {
-	createForm := &JSPluginCreateForm{Name: "plugin", Script: "console.log('ok')"}
-	if err := createForm.Validate(); err != nil {
-		t.Fatalf("expected valid create form, got %v", err)
-	}
-
-	execForm := &JSPluginExecuteForm{Expression: "1+1"}
-	if err := execForm.Validate(); err != nil {
-		t.Fatalf("expected valid execute form, got %v", err)
-	}
-}
-
 func TestJobCreateFormValidate(t *testing.T) {
 	form := &JobCreateForm{}
 	if err := form.Validate(); err == nil {

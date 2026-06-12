@@ -334,8 +334,6 @@ func authRequiredForRoute(method, route string) bool {
 		return true
 	case strings.HasPrefix(route, "/api/v1/fts"):
 		return true
-	case strings.HasPrefix(route, "/api/v1/plugins/js"):
-		return true
 	case strings.HasPrefix(route, "/api/v1/jobs"):
 		return true
 	default:
@@ -505,7 +503,6 @@ func successStatusForRoute(method, route string) string {
 		"/api/v1/files/upload",
 		"/api/v1/api-keys/",
 		"/api/v1/backups/",
-		"/api/v1/plugins/js/",
 		"/api/v1/jobs/":
 		return "201"
 	default:
@@ -636,8 +633,6 @@ func tagFromRoute(route string) string {
 		return "Search"
 	case strings.Contains(route, "jobs"):
 		return "Jobs"
-	case strings.Contains(route, "plugins"):
-		return "Plugins"
 	default:
 		return "General"
 	}

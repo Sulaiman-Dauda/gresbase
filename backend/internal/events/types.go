@@ -533,20 +533,6 @@ type JobRequestEvent struct {
 	Data     map[string]any
 }
 
-// JSPluginRequestEvent is fired for JS plugin management requests.
-type JSPluginRequestEvent struct {
-	BaseEvent
-	App        interface{}
-	Request    *http.Request
-	Info       *HTTPRequestInfo
-	Action     string
-	PluginID   string
-	Name       string
-	Script     string
-	Expression string
-	Priority   int
-}
-
 // -------------------------------------------------------------------
 // Collection events
 // -------------------------------------------------------------------
@@ -720,10 +706,6 @@ func (e *FTSIndexRequestEvent) EventTags() []string {
 
 func (e *JobRequestEvent) EventTags() []string {
 	return uniqueNonEmpty([]string{"jobs:" + e.Action, e.JobID, e.Name})
-}
-
-func (e *JSPluginRequestEvent) EventTags() []string {
-	return uniqueNonEmpty([]string{"jsplugins:" + e.Action, e.PluginID, e.Name})
 }
 
 func requestCollectionTags(action, collectionID, collectionName, recordID string) []string {

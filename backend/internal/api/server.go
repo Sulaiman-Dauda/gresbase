@@ -147,8 +147,6 @@ func (s *Server) mountRoutes() {
 	backupsRead := mw.RequirePermission("backups.read")
 	backupsWrite := mw.RequirePermission("backups.write")
 	ftsWrite := mw.RequirePermission("fts.write")
-	pluginsRead := mw.RequirePermission("plugins.read")
-	pluginsWrite := mw.RequirePermission("plugins.write")
 	jobsRead := mw.RequirePermission("jobs.read")
 	jobsWrite := mw.RequirePermission("jobs.write")
 	recordsImpersonate := mw.RequirePermission("records.impersonate")
@@ -347,17 +345,6 @@ func (s *Server) mountRoutes() {
 			r.With(editor, ftsWrite).Delete("/{collection}", h.FTSRemoveIndex)
 		})
 
-		// JS Plugins (experimental, disabled unless js_plugins_enabled is set)
-		r.Route("/plugins/js", func(r chi.Router) {
-			r.Use(s.requireJSPluginsEnabled)
-			r.Use(mw.RequireAuth)
-			r.With(admin, pluginsRead).Get("/", h.JSPluginsList)
-			r.With(admin, pluginsWrite).Post("/", h.JSPluginCreate)
-			r.With(admin, pluginsRead).Get("/{id}", h.JSPluginGet)
-			r.With(admin, pluginsWrite).Post("/{id}/execute", h.JSPluginExecute)
-			r.With(admin, pluginsWrite).Delete("/{id}", h.JSPluginDelete)
-		})
-
 		// Cron jobs
 		r.Route("/jobs", func(r chi.Router) {
 			r.Use(mw.RequireAuth)
@@ -456,18 +443,6 @@ func (s *Server) prometheusMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.app.Metrics().PrometheusHandler("0.3.0")(w, r)
-}
-
-// requireJSPluginsEnabled returns 404 for the JS plugin endpoints unless the
-// unsandboxed runtime has been explicitly enabled via js_plugins_enabled.
-func (s *Server) requireJSPluginsEnabled(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.app == nil || s.app.Config() == nil || !s.app.Config().JSPluginsEnabled {
-			writeError(w, http.StatusNotFound, "JavaScript plugins are disabled")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 // Start begins listening. Supports TLS when configured.

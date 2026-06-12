@@ -717,40 +717,6 @@ func (f *BatchRecordsForm) Validate() error {
 	return nil
 }
 
-// JSPluginCreateForm validates JS plugin creation payloads.
-type JSPluginCreateForm struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Script   string `json:"script"`
-	Priority int    `json:"priority"`
-}
-
-func (f *JSPluginCreateForm) Validate() error {
-	errs := Errors{}
-	if strings.TrimSpace(f.Name) == "" {
-		errs.Add("name", "name is required")
-	}
-	if strings.TrimSpace(f.Script) == "" {
-		errs.Add("script", "script is required")
-	}
-	if errs.HasAny() {
-		return errs
-	}
-	return nil
-}
-
-// JSPluginExecuteForm validates JS plugin execution payloads.
-type JSPluginExecuteForm struct {
-	Expression string `json:"expression"`
-}
-
-func (f *JSPluginExecuteForm) Validate() error {
-	if strings.TrimSpace(f.Expression) == "" {
-		return Errors{"expression": "expression is required"}
-	}
-	return nil
-}
-
 // JobCreateForm validates cron job creation payloads.
 type JobCreateForm struct {
 	Name     string         `json:"name"`

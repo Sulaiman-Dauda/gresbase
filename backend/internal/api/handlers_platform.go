@@ -14,7 +14,6 @@ import (
 	"github.com/gresbase/gresbase/internal/events"
 	"github.com/gresbase/gresbase/internal/forms"
 	"github.com/gresbase/gresbase/internal/job"
-	"github.com/gresbase/gresbase/internal/jsplugin"
 	"github.com/gresbase/gresbase/internal/mailer"
 	"github.com/gresbase/gresbase/internal/settings"
 	"github.com/gresbase/gresbase/internal/storage"
@@ -421,114 +420,6 @@ func (h *Handlers) BackupsDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, name))
 	http.ServeFile(w, r, path)
-}
-
-// ---------------------------------------------------------------------------
-// JS Plugins
-// ---------------------------------------------------------------------------
-
-func (h *Handlers) JSPluginsList(w http.ResponseWriter, r *http.Request) {
-	event := &events.JSPluginRequestEvent{App: h.app, Request: r, Info: toEventRequestInfo(r), Action: "list"}
-	var plugins any
-	if err := h.app.OnJSPluginRequest().Trigger(event, func(e events.Event) error {
-		plugins = h.app.JSRuntime().ListPlugins()
-		return nil
-	}); err != nil {
-		writeError(w, 500, "Failed to list plugins")
-		return
-	}
-	writeOK(w, plugins)
-}
-
-func (h *Handlers) JSPluginCreate(w http.ResponseWriter, r *http.Request) {
-	var form forms.JSPluginCreateForm
-	if err := decodeJSONBody(r, &form); err != nil {
-		writeError(w, 400, "Invalid body")
-		return
-	}
-	if err := form.Validate(); err != nil {
-		writeValidationError(w, err)
-		return
-	}
-	if form.ID == "" {
-		form.ID = "js-" + generateID()
-	}
-
-	event := &events.JSPluginRequestEvent{App: h.app, Request: r, Info: toEventRequestInfoWithBody(r, form), Action: "create", PluginID: form.ID, Name: form.Name, Script: form.Script, Priority: form.Priority}
-	var pluginInfo *jsplugin.ScriptPlugin
-	if err := h.app.OnJSPluginRequest().Trigger(event, func(e events.Event) error {
-		var err error
-		pluginInfo, err = h.app.JSRuntime().LoadPlugin(form.ID, form.Name, form.Script, form.Priority)
-		return err
-	}); err != nil {
-		writeError(w, 400, "Failed to load plugin: "+err.Error())
-		return
-	}
-
-	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
-	h.app.Auth().RecordAudit(r.Context(), adminID, "jsplugin.create", "_js_plugins", form.ID, nil, r)
-
-	writeJSON(w, 201, map[string]any{
-		"id":   pluginInfo.ID,
-		"name": pluginInfo.Name,
-	})
-}
-
-func (h *Handlers) JSPluginGet(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	event := &events.JSPluginRequestEvent{App: h.app, Request: r, Info: toEventRequestInfo(r), Action: "get", PluginID: id}
-	var script string
-	if err := h.app.OnJSPluginRequest().Trigger(event, func(e events.Event) error {
-		var err error
-		script, err = h.app.JSRuntime().GetPluginScript(id)
-		return err
-	}); err != nil {
-		writeError(w, 404, "Plugin not found")
-		return
-	}
-	writeOK(w, map[string]any{"id": id, "script": script})
-}
-
-func (h *Handlers) JSPluginExecute(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var form forms.JSPluginExecuteForm
-	if err := decodeJSONBody(r, &form); err != nil {
-		writeError(w, 400, "Invalid body")
-		return
-	}
-	if err := form.Validate(); err != nil {
-		writeValidationError(w, err)
-		return
-	}
-
-	event := &events.JSPluginRequestEvent{App: h.app, Request: r, Info: toEventRequestInfoWithBody(r, form), Action: "execute", PluginID: id, Expression: form.Expression}
-	var result interface{ Export() any }
-	if err := h.app.OnJSPluginRequest().Trigger(event, func(e events.Event) error {
-		var err error
-		result, err = h.app.JSRuntime().Execute(id, form.Expression)
-		return err
-	}); err != nil {
-		writeError(w, 500, "Execution failed: "+err.Error())
-		return
-	}
-	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
-	h.app.Auth().RecordAudit(r.Context(), adminID, "jsplugin.execute", "_js_plugins", id, map[string]any{"expression": form.Expression}, r)
-	writeOK(w, map[string]any{"result": result.Export()})
-}
-
-func (h *Handlers) JSPluginDelete(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	event := &events.JSPluginRequestEvent{App: h.app, Request: r, Info: toEventRequestInfo(r), Action: "delete", PluginID: id}
-	if err := h.app.OnJSPluginRequest().Trigger(event, func(e events.Event) error {
-		h.app.JSRuntime().UnloadPlugin(id)
-		return nil
-	}); err != nil {
-		writeError(w, 500, "Delete failed: "+err.Error())
-		return
-	}
-	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
-	h.app.Auth().RecordAudit(r.Context(), adminID, "jsplugin.delete", "_js_plugins", id, nil, r)
-	writeOK(w, map[string]any{"deleted": id})
 }
 
 // ---------------------------------------------------------------------------
