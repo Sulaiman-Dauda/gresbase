@@ -1,6 +1,7 @@
 package collection_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/gresbase/gresbase/internal/collection"
@@ -109,9 +110,10 @@ func TestValidateRuleExpression(t *testing.T) {
 		{"published = true", true},
 		{"@request.auth.role = 'admin'", true},
 		{"count > 5 AND status = 'active'", true},
+		{"count > 5 && status = 'active'", true},
 		{"unbalanced 'quote", false},
 		{"unbalanced (paren", false},
-		{`"double" 'single'`, true},
+		{`"double" 'single'`, false}, // two bare literals are not a comparison
 	}
 
 	for _, tt := range tests {
@@ -124,5 +126,75 @@ func TestValidateRuleExpression(t *testing.T) {
 				t.Errorf("Expected error for invalid rule: %q", tt.rule)
 			}
 		})
+	}
+}
+
+func TestValidateCollectionDefinition(t *testing.T) {
+	svc := collection.NewService(nil)
+
+	t.Run("rejects invalid identifiers", func(t *testing.T) {
+		coll := &collection.Collection{
+			Name:   "bad-name",
+			Type:   collection.TypeBase,
+			Schema: []collection.SchemaField{{Name: "title", Type: collection.FieldText}},
+		}
+		if err := svc.ValidateCollectionDefinition(coll); err == nil {
+			t.Fatal("expected invalid collection name error")
+		}
+	})
+
+	t.Run("rejects dangerous view queries", func(t *testing.T) {
+		coll := &collection.Collection{
+			Name:      "reports",
+			Type:      collection.TypeView,
+			ViewQuery: "SELECT 1; DROP TABLE users;",
+		}
+		if err := svc.ValidateCollectionDefinition(coll); err == nil {
+			t.Fatal("expected invalid view_query error")
+		}
+	})
+
+	t.Run("rejects invalid defaults", func(t *testing.T) {
+		coll := &collection.Collection{
+			Name: "posts",
+			Type: collection.TypeBase,
+			Schema: []collection.SchemaField{{
+				Name:    "published",
+				Type:    collection.FieldBool,
+				Options: map[string]any{"default": "yes"},
+			}},
+		}
+		err := svc.ValidateCollectionDefinition(coll)
+		if err == nil || !strings.Contains(err.Error(), "default") {
+			t.Fatalf("expected default validation error, got %v", err)
+		}
+	})
+}
+
+func TestValidateRecordAndPatch(t *testing.T) {
+	svc := collection.NewService(nil)
+	coll := &collection.Collection{
+		Name: "posts",
+		Type: collection.TypeBase,
+		Schema: []collection.SchemaField{
+			{Name: "title", Type: collection.FieldText, Required: true},
+			{Name: "published", Type: collection.FieldBool},
+		},
+	}
+
+	if err := svc.ValidateRecord(coll, map[string]any{"published": true}); err == nil {
+		t.Fatal("expected create validation to require title")
+	}
+
+	if err := svc.ValidateRecordPatch(coll, map[string]any{"published": true}); err != nil {
+		t.Fatalf("expected partial validation to allow missing required fields, got %v", err)
+	}
+
+	if err := svc.ValidateRecordPatch(coll, map[string]any{"unknown": true}); err == nil {
+		t.Fatal("expected unknown field to be rejected")
+	}
+
+	if err := svc.ValidateRecordPatch(coll, map[string]any{"created_at": "hack"}); err == nil {
+		t.Fatal("expected system field to be rejected")
 	}
 }

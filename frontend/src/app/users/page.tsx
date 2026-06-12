@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { AppLayout } from '@/components/layout/app-layout'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -97,7 +98,8 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <AppLayout>
+      <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Admin Users</h1>
@@ -260,5 +262,6 @@ export default function UsersPage() {
         )}
       </div>
     </div>
+    </AppLayout>
   )
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -216,52 +217,21 @@ func RateLimitByKey(maxRequests int, window time.Duration, keyFunc func(r *http.
 func GetClientIP(r *http.Request) string {
 	// Check X-Forwarded-For header
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP in the chain
-		parts := splitComma(xff)
+		parts := strings.Split(xff, ",")
 		if len(parts) > 0 {
-			return parts[0]
+			if ip := strings.TrimSpace(parts[0]); ip != "" {
+				return ip
+			}
 		}
 	}
 
 	// Check X-Real-IP
 	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
+		return strings.TrimSpace(xri)
 	}
 
 	// Fall back to remote address
 	return r.RemoteAddr
-}
-
-func splitComma(s string) []string {
-	var parts []string
-	current := ""
-	for _, ch := range s {
-		if ch == ',' {
-			current = trimSpace(current)
-			if current != "" {
-				parts = append(parts, current)
-			}
-			current = ""
-		} else {
-			current += string(ch)
-		}
-	}
-	current = trimSpace(current)
-	if current != "" {
-		parts = append(parts, current)
-	}
-	return parts
-}
-
-func trimSpace(s string) string {
-	start, end := 0, len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
-		end--
-	}
-	return s[start:end]
 }
 
 // ---------------------------------------------------------------------------

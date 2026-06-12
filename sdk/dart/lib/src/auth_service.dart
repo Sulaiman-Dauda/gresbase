@@ -1,188 +1,252 @@
-/// Authentication service for Gresbase Dart SDK.
-library gresbase_sdk_auth;
+/// Authentication service: admin auth + shared token store.
+library;
 
 import 'dart:async';
-import 'dart:convert';
+
 import 'http_client.dart';
 import 'models.dart';
 
-/// Callback type for auth events.
-typedef AuthEventHandler = void Function(AuthResponse? data);
+/// Callback invoked whenever the auth state changes.
+///
+/// Receives a JSON-serializable snapshot (`token`, `refreshToken`, `admin`,
+/// `record`) that can be persisted (e.g. shared_preferences, secure storage)
+/// and later restored via [AuthService.restore]. All values are `null` after
+/// logout.
+typedef AuthPersistCallback = void Function(Map<String, dynamic> authData);
 
-/// Authentication service with login, register, OAuth, OTP, magic link, and token management.
+/// Admin authentication and shared token store.
+///
+/// The token store is in-memory; pass an [AuthPersistCallback] to mirror
+/// auth state to durable storage, and call [restore] on startup.
+/// Both admin auth (`client.auth.login`) and record auth
+/// (`client.collection('users').authWithPassword`) share this store, so all
+/// subsequent requests and realtime connections are authenticated.
 class AuthService {
-  final HttpClient _http;
+  final GresbaseHttpClient _http;
+  final AuthPersistCallback? _onChange;
+
   String? _token;
   String? _refreshToken;
   AdminUser? _admin;
-  Future<String?>? _refreshPromise;
+  RecordData? _record;
+  Future<String?>? _refreshFuture;
 
-  final List<AuthEventHandler> _onLogin = [];
-  final List<AuthEventHandler> _onLogout = [];
-  final List<AuthEventHandler> _onRefresh = [];
+  final _events = StreamController<String>.broadcast();
 
-  AuthService(this._http);
+  AuthService(this._http, {AuthPersistCallback? onChange})
+      : _onChange = onChange;
 
-  /// Current auth token.
+  /// Current access token (null when unauthenticated).
   String? get token => _token;
 
   /// Current refresh token.
   String? get refreshToken => _refreshToken;
 
-  /// Currently authenticated admin user.
+  /// The authenticated admin user (set by admin login).
   AdminUser? get admin => _admin;
 
-  /// Whether the client is authenticated.
-  bool get isAuthenticated => _token != null;
+  /// The authenticated collection record (set by record auth).
+  RecordData? get record => _record;
 
-  /// Listen for login events.
-  void onLogin(AuthEventHandler handler) => _onLogin.add(handler);
+  /// Whether the client holds an access token.
+  bool get isAuthenticated => _token != null && _token!.isNotEmpty;
 
-  /// Listen for logout events.
-  void onLogout(AuthEventHandler handler) => _onLogout.add(handler);
+  /// Auth lifecycle events: `login`, `register`, `refresh`, `logout`.
+  Stream<String> get events => _events.stream;
 
-  /// Listen for token refresh events.
-  void onRefreshEvent(AuthEventHandler handler) => _onRefresh.add(handler);
+  void _notify(String event) {
+    _onChange?.call({
+      'token': _token,
+      'refreshToken': _refreshToken,
+      'admin': _admin?.toJson(),
+      'record': _record,
+    });
+    if (!_events.isClosed) _events.add(event);
+  }
 
-  /// Login with email and password.
+  /// Manually set the auth tokens (e.g. from a server-issued token).
+  void setToken(String? token, [String? refreshToken]) {
+    _token = token;
+    if (refreshToken != null) _refreshToken = refreshToken;
+    _notify('change');
+  }
+
+  /// Restore a previously persisted auth snapshot (see [AuthPersistCallback]).
+  void restore(Map<String, dynamic> authData) {
+    _token = authData['token'] as String?;
+    _refreshToken = authData['refreshToken'] as String?;
+    final adminJson = authData['admin'];
+    _admin = adminJson is Map<String, dynamic>
+        ? AdminUser.fromJson(adminJson)
+        : null;
+    final recordJson = authData['record'];
+    _record = recordJson is Map<String, dynamic> ? recordJson : null;
+  }
+
+  /// Store a record-auth result (token + refresh token + auth record) in the
+  /// shared token store. Used by record auth methods so that record auth and
+  /// admin auth share the exact same plumbing.
+  void setRecordAuth(RecordAuthResponse result) {
+    _token = result.token;
+    _refreshToken = result.refreshToken;
+    _record = result.record;
+    _notify('login');
+  }
+
+  /// Login with admin email and password.
   Future<AuthResponse> login(String email, String password) async {
-    final result = await _http.request('POST', '/api/v1/auth/login',
+    final result = await _http.send('POST', '/api/v1/auth/login',
         body: {'email': email, 'password': password});
-    final response = AuthResponse.fromJson(result);
+    final response = AuthResponse.fromJson(result as Map<String, dynamic>);
     _token = response.token;
     _refreshToken = response.refreshToken;
     _admin = response.admin;
-    _notify(_onLogin, response);
+    _record = null;
+    _notify('login');
     return response;
   }
 
   /// Register a new admin user.
-  Future<AuthResponse> register(
-      String email, String password, {String role = 'admin'}) async {
-    final result = await _http.request('POST', '/api/v1/auth/register',
+  Future<AuthResponse> register(String email, String password,
+      {String role = 'admin'}) async {
+    final result = await _http.send('POST', '/api/v1/auth/register',
         body: {'email': email, 'password': password, 'role': role});
-    final response = AuthResponse.fromJson(result);
+    final response = AuthResponse.fromJson(result as Map<String, dynamic>);
     _token = response.token;
     _refreshToken = response.refreshToken;
     _admin = response.admin;
-    _notify(_onLogin, response);
+    _record = null;
+    _notify('register');
     return response;
   }
 
-  /// Refresh the access token.
-  Future<String?> refresh() async {
-    if (_refreshToken == null) return null;
-    if (_refreshPromise != null) return _refreshPromise;
-
-    _refreshPromise = _doRefresh();
-    try {
-      return await _refreshPromise;
-    } finally {
-      _refreshPromise = null;
+  /// Refresh the access token using the stored refresh token.
+  ///
+  /// Returns the new access token, or null when no refresh token is stored
+  /// or the refresh fails (in which case local auth state is cleared).
+  /// Concurrent calls are deduplicated.
+  Future<String?> refresh() {
+    if (_refreshToken == null || _refreshToken!.isEmpty) {
+      return Future.value(null);
     }
+    final inFlight = _refreshFuture;
+    if (inFlight != null) return inFlight;
+
+    final future = _doRefresh();
+    _refreshFuture = future;
+    return future;
   }
 
   Future<String?> _doRefresh() async {
     try {
-      final result = await _http.request('POST', '/api/v1/auth/refresh',
-          body: {'refreshToken': _refreshToken});
-      _token = result['token'] as String?;
-      _refreshToken = result['refreshToken'] as String?;
-      _notify(_onRefresh, null);
+      final result = await _http.send('POST', '/api/v1/auth/refresh',
+          body: {'refreshToken': _refreshToken}, retryOn401: false);
+      final data = result as Map<String, dynamic>;
+      _token = data['token'] as String?;
+      _refreshToken = data['refreshToken'] as String? ?? _refreshToken;
+      _notify('refresh');
       return _token;
     } catch (_) {
       await logout(serverLogout: false);
       return null;
+    } finally {
+      _refreshFuture = null;
     }
   }
 
-  /// Logout and clear session.
+  /// Logout and clear the local session.
   Future<void> logout({bool serverLogout = true}) async {
     try {
-      if (serverLogout && _token != null) {
-        await _http.request('POST', '/api/v1/auth/logout');
+      if (serverLogout && isAuthenticated) {
+        await _http.send('POST', '/api/v1/auth/logout', body: const {});
       }
-    } catch (_) {}
+    } catch (_) {
+      // Always clear local state.
+    }
     _token = null;
     _refreshToken = null;
     _admin = null;
-    _notify(_onLogout, null);
+    _record = null;
+    _notify('logout');
   }
 
-  /// Request OTP code.
+  /// Request an OTP code.
   Future<Map<String, dynamic>> requestOTP(String email) async {
-    return _http.request('POST', '/api/v1/auth/otp/request', body: {'email': email});
+    final result = await _http
+        .send('POST', '/api/v1/auth/otp/request', body: {'email': email});
+    return (result as Map<String, dynamic>?) ?? {};
   }
 
-  /// Verify OTP code and login.
+  /// Verify an OTP code and login.
   Future<AuthResponse> verifyOTP(String otpId, String code) async {
-    final result = await _http.request('POST', '/api/v1/auth/otp/verify',
+    final result = await _http.send('POST', '/api/v1/auth/otp/verify',
         body: {'otpId': otpId, 'code': code});
-    final response = AuthResponse.fromJson(result);
+    final response = AuthResponse.fromJson(result as Map<String, dynamic>);
     _token = response.token;
     _refreshToken = response.refreshToken;
     _admin = response.admin;
-    _notify(_onLogin, response);
+    _record = null;
+    _notify('login');
     return response;
   }
 
-  /// Request magic link.
+  /// Request a magic link email.
   Future<void> requestMagicLink(String email) async {
-    await _http.request('POST', '/api/v1/auth/magic-link', body: {'email': email});
+    await _http.send('POST', '/api/v1/auth/magic-link', body: {'email': email});
   }
 
-  /// Verify magic link token and login.
+  /// Verify a magic link token and login.
   Future<AuthResponse> verifyMagicLink(String token) async {
-    final result = await _http.request('POST', '/api/v1/auth/magic-link/verify',
-        body: {'token': token});
-    final response = AuthResponse.fromJson(result);
+    final result = await _http
+        .send('POST', '/api/v1/auth/magic-link/verify', body: {'token': token});
+    final response = AuthResponse.fromJson(result as Map<String, dynamic>);
     _token = response.token;
     _refreshToken = response.refreshToken;
     _admin = response.admin;
-    _notify(_onLogin, response);
+    _record = null;
+    _notify('login');
     return response;
   }
 
-  /// Get OAuth authorization URL.
-  String oAuthURL(String provider, {String? redirectUrl}) {
+  /// Build the OAuth login redirect URL for a provider.
+  String oAuthUrl(String provider, {String? redirectUrl}) {
     var url = '${_http.baseUrl}/api/v1/oauth/$provider';
     if (redirectUrl != null) {
-      url += '?redirectUrl=${Uri.encodeComponent(redirectUrl)}';
+      url += '?redirectUrl=${Uri.encodeQueryComponent(redirectUrl)}';
     }
     return url;
   }
 
-  /// Request password reset.
+  /// Request an admin password reset email.
   Future<void> requestPasswordReset(String email) async {
-    await _http.request('POST', '/api/v1/admin/password-reset',
-        body: {'email': email});
+    await _http
+        .send('POST', '/api/v1/admin/password-reset', body: {'email': email});
   }
 
-  /// Confirm password reset.
+  /// Confirm an admin password reset.
   Future<void> confirmPasswordReset(String token, String newPassword) async {
-    await _http.request('POST', '/api/v1/admin/password-reset/confirm',
+    await _http.send('POST', '/api/v1/admin/password-reset/confirm',
         body: {'token': token, 'newPassword': newPassword});
   }
 
-  /// Get current admin profile.
+  /// Get the current admin profile.
   Future<AdminUser> getMe() async {
-    final result =
-        await _http.request('GET', '/api/v1/admin/me');
-    _admin = AdminUser.fromJson(result);
+    final result = await _http.send('GET', '/api/v1/admin/me');
+    _admin = AdminUser.fromJson(result as Map<String, dynamic>);
+    _notify('change');
     return _admin!;
   }
 
-  /// Update current admin profile.
+  /// Update the current admin profile.
   Future<AdminUser> updateMe(Map<String, dynamic> data) async {
-    final result =
-        await _http.request('PUT', '/api/v1/admin/me', body: data);
-    _admin = AdminUser.fromJson(result);
+    final result = await _http.send('PUT', '/api/v1/admin/me', body: data);
+    _admin = AdminUser.fromJson(result as Map<String, dynamic>);
+    _notify('change');
     return _admin!;
   }
 
-  void _notify(List<AuthEventHandler> handlers, AuthResponse? data) {
-    for (final handler in handlers) {
-      handler(data);
-    }
+  /// Release resources held by the auth event stream.
+  void dispose() {
+    _events.close();
   }
 }

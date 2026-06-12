@@ -4,17 +4,20 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // G505: HMAC-SHA1 is mandated by RFC 6238 (TOTP); used only for OTP generation, not as a security hash.
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
 	"time"
 
 	"github.com/gresbase/gresbase/internal/database"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog/log"
 )
 
@@ -28,16 +31,24 @@ func NewMFAService(db *database.DB) *MFAService {
 	return &MFAService{db: db}
 }
 
+func (s *MFAService) exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return s.db.ExecResult(ctx, sql, args...)
+}
+
+func (s *MFAService) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return s.db.QueryRow(ctx, sql, args...)
+}
+
 // MFASecret is a generated TOTP secret for a user.
 type MFASecret struct {
-	ID        string    `json:"id"`
-	AdminID   string    `json:"admin_id"`
-	Secret    string    `json:"secret"`    // base32 encoded secret
-	QRCodeURL string    `json:"qr_code_url,omitempty"`
-	Enabled   bool      `json:"enabled"`
-	BackupCodes []string `json:"backup_codes,omitempty"` // hashed
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	AdminID     string    `json:"admin_id"`
+	Secret      string    `json:"secret"` // base32 encoded secret
+	QRCodeURL   string    `json:"qr_code_url,omitempty"`
+	Enabled     bool      `json:"enabled"`
+	BackupCodes []string  `json:"backup_codes,omitempty"` // hashed
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // MFAToken represents a TOTP token validation.
@@ -67,7 +78,7 @@ func (s *MFAService) GenerateSecret(ctx context.Context, adminID, email, issuer 
 	}
 
 	// Store in database
-	_, err := s.db.Pool.Exec(ctx, `
+	_, err := s.exec(ctx, `
 		INSERT INTO _mfa_secrets (id, admin_id, secret, enabled, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (admin_id) DO UPDATE SET secret = $3, enabled = FALSE, updated_at = $6`,
@@ -85,7 +96,7 @@ func (s *MFAService) GenerateSecret(ctx context.Context, adminID, email, issuer 
 func (s *MFAService) VerifyAndEnable(ctx context.Context, adminID, code string) ([]string, error) {
 	// Retrieve secret
 	var secret string
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		"SELECT secret FROM _mfa_secrets WHERE admin_id = $1 AND enabled = FALSE",
 		adminID,
 	).Scan(&secret)
@@ -103,7 +114,7 @@ func (s *MFAService) VerifyAndEnable(ctx context.Context, adminID, code string) 
 	backupCodesJSON, _ := json.Marshal(backupCodes)
 
 	// Enable MFA
-	_, err = s.db.Pool.Exec(ctx, `
+	_, err = s.exec(ctx, `
 		UPDATE _mfa_secrets SET enabled = TRUE, backup_codes = $3, updated_at = $4
 		WHERE admin_id = $1 AND secret = $2`,
 		adminID, secret, backupCodesJSON, time.Now(),
@@ -121,13 +132,16 @@ func (s *MFAService) ValidateToken(ctx context.Context, adminID, code string) (b
 	// Try TOTP first
 	var secret string
 	var enabled bool
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		"SELECT secret, enabled FROM _mfa_secrets WHERE admin_id = $1",
 		adminID,
 	).Scan(&secret, &enabled)
 
 	if err != nil {
-		return false, nil // MFA not set up, allow
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil // MFA not set up, allow.
+		}
+		return false, err // Fail closed on real DB errors.
 	}
 
 	if !enabled {
@@ -140,7 +154,7 @@ func (s *MFAService) ValidateToken(ctx context.Context, adminID, code string) (b
 
 	// Try backup codes
 	var backupCodesJSON []byte
-	err = s.db.Pool.QueryRow(ctx,
+	err = s.queryRow(ctx,
 		"SELECT backup_codes FROM _mfa_secrets WHERE admin_id = $1",
 		adminID,
 	).Scan(&backupCodesJSON)
@@ -152,11 +166,14 @@ func (s *MFAService) ValidateToken(ctx context.Context, adminID, code string) (b
 				// Compare hash
 				codeHash := sha256Hash(code)
 				if bc == codeHash {
-					// Remove used backup code
+					// Remove used backup code. If this write fails we must not
+					// accept the code, otherwise it could be reused.
 					backupCodes = append(backupCodes[:i], backupCodes[i+1:]...)
 					newJSON, _ := json.Marshal(backupCodes)
-					s.db.Pool.Exec(ctx, "UPDATE _mfa_secrets SET backup_codes = $1 WHERE admin_id = $2",
-						newJSON, adminID)
+					if _, err := s.exec(ctx, "UPDATE _mfa_secrets SET backup_codes = $1 WHERE admin_id = $2",
+						newJSON, adminID); err != nil {
+						return false, fmt.Errorf("consume backup code: %w", err)
+					}
 					return true, nil
 				}
 			}
@@ -168,7 +185,7 @@ func (s *MFAService) ValidateToken(ctx context.Context, adminID, code string) (b
 
 // DisableMFA disables MFA for a user.
 func (s *MFAService) DisableMFA(ctx context.Context, adminID string) error {
-	_, err := s.db.Pool.Exec(ctx,
+	_, err := s.exec(ctx,
 		"UPDATE _mfa_secrets SET enabled = FALSE, updated_at = $2 WHERE admin_id = $1",
 		adminID, time.Now(),
 	)
@@ -182,7 +199,7 @@ func (s *MFAService) DisableMFA(ctx context.Context, adminID string) error {
 // IsMFAEnabled checks if MFA is enabled for a user.
 func (s *MFAService) IsMFAEnabled(ctx context.Context, adminID string) bool {
 	var enabled bool
-	err := s.db.Pool.QueryRow(ctx,
+	err := s.queryRow(ctx,
 		"SELECT enabled FROM _mfa_secrets WHERE admin_id = $1",
 		adminID,
 	).Scan(&enabled)
@@ -196,7 +213,11 @@ func (s *MFAService) IsMFAEnabled(ctx context.Context, adminID string) bool {
 // generateTOTPSecret generates a cryptographically random base32 secret.
 func generateTOTPSecret() string {
 	bytes := make([]byte, 20) // 160 bits
-	rand.Read(bytes)
+	// crypto/rand.Read only fails on a broken system entropy source, which is
+	// unrecoverable; a panic here is preferable to issuing a weak secret.
+	if _, err := rand.Read(bytes); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed generating TOTP secret: %v", err))
+	}
 	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(bytes)
 }
 
@@ -208,7 +229,14 @@ func generateTOTP(secret string, t time.Time) (string, error) {
 		return "", fmt.Errorf("decode secret: %w", err)
 	}
 
-	counter := uint64(t.Unix() / 30)
+	// RFC 6238 time-step counter. Unix time is non-negative for any real clock;
+	// clamp defensively so the int64->uint64 conversion can never wrap.
+	step := t.Unix() / 30
+	if step < 0 {
+		step = 0
+	}
+	//nolint:gosec // G115 false positive: step is clamped to >= 0 above, so the int64->uint64 conversion cannot wrap.
+	counter := uint64(step)
 
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, counter)
@@ -273,11 +301,11 @@ func hashBackupCodes(codes []string) []string {
 // generateRandomCode generates a random alphanumeric code of given length.
 func generateRandomCode(length int) string {
 	const charset = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	raw := make([]byte, length)
+	mustRandRead(raw)
 	b := make([]byte, length)
-	for i := range b {
-		randomByte := make([]byte, 1)
-		rand.Read(randomByte)
-		b[i] = charset[int(randomByte[0])%len(charset)]
+	for i, v := range raw {
+		b[i] = charset[int(v)%len(charset)]
 	}
 	return string(b)
 }
@@ -291,7 +319,7 @@ func sha256Hash(s string) string {
 // generateID creates a short unique ID for records.
 func generateID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	mustRandRead(b)
 	return fmt.Sprintf("%x", b)
 }
 

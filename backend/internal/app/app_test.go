@@ -4,7 +4,11 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/gresbase/gresbase/internal/auth"
 	"github.com/gresbase/gresbase/internal/config"
+	"github.com/gresbase/gresbase/internal/database"
+	"github.com/gresbase/gresbase/internal/events"
+	"github.com/gresbase/gresbase/internal/plugin"
 )
 
 func TestNew(t *testing.T) {
@@ -64,6 +68,15 @@ func TestNew(t *testing.T) {
 	if app.OnCollectionDelete() == nil {
 		t.Error("expected OnCollectionDelete hook")
 	}
+	if app.OnRecordsListRequest() == nil || app.OnRecordCreateRequest() == nil || app.OnRecordAuthRequest() == nil {
+		t.Error("expected expanded request hooks to be initialized")
+	}
+	if app.OnAdminUserRequest() == nil || app.OnCollectionRequest() == nil || app.OnBackupListRequest() == nil || app.OnBackupDeleteRequest() == nil {
+		t.Error("expected broader request hooks to be initialized")
+	}
+	if app.OnRealtimeRequest() == nil {
+		t.Error("expected realtime request hook to be initialized")
+	}
 }
 
 func TestNew_DebugLog(t *testing.T) {
@@ -101,9 +114,6 @@ func TestApp_AccessorsBeforeBootstrap(t *testing.T) {
 	if app.Storage() != nil {
 		t.Error("expected nil Storage before bootstrap")
 	}
-	if app.ACME() != nil {
-		t.Error("expected nil ACME before bootstrap")
-	}
 	if app.Realtime() != nil {
 		t.Error("expected nil Realtime before bootstrap")
 	}
@@ -115,9 +125,6 @@ func TestApp_AccessorsBeforeBootstrap(t *testing.T) {
 	}
 	if app.Plugins() != nil {
 		t.Error("expected nil Plugins before bootstrap")
-	}
-	if app.Tenants() != nil {
-		t.Error("expected nil Tenants before bootstrap")
 	}
 	if app.Search() != nil {
 		t.Error("expected nil Search before bootstrap")
@@ -172,16 +179,6 @@ func TestApp_CreateAdminWithoutBootstrap(t *testing.T) {
 	}
 }
 
-func TestApp_IssueCertificateWithoutBootstrap(t *testing.T) {
-	cfg := &config.Config{Addr: ":8080", LogLevel: "info"}
-	app, _ := New(cfg)
-
-	err := app.IssueCertificate("example.com")
-	if err == nil {
-		t.Fatal("expected error issuing certificate without bootstrap")
-	}
-}
-
 func TestApp_Config(t *testing.T) {
 	cfg := &config.Config{Addr: ":9090", LogLevel: "warn"}
 	app, _ := New(cfg)
@@ -200,6 +197,127 @@ func TestApp_SetAPIServer(t *testing.T) {
 
 	// Can't test Serve() without bootstrap, but we can verify it's set
 	// The SetAPIServer should store it
+}
+
+func TestApp_RecordAuthAccessorCachesService(t *testing.T) {
+	cfg := &config.Config{Addr: ":8080", LogLevel: "info", JWTSecret: "secret"}
+	app, _ := New(cfg)
+	app.cfg = cfg
+	app.db = &database.DB{}
+	app.authService = auth.NewService(nil, cfg)
+
+	first := app.RecordAuth()
+	second := app.RecordAuth()
+	if first == nil {
+		t.Fatal("expected record auth service")
+	}
+	if first != second {
+		t.Fatal("expected RecordAuth accessor to cache the service")
+	}
+}
+
+func TestApp_WirePluginHooksDispatchesHandlers(t *testing.T) {
+	cfg := &config.Config{Addr: ":8080", LogLevel: "info"}
+	app, _ := New(cfg)
+	app.pluginRegistry = plugin.NewRegistry()
+
+	called := false
+	err := app.pluginRegistry.Register(&plugin.Plugin{
+		ID:      "test.plugin",
+		Name:    "Test",
+		Version: "0.0.1",
+		Enabled: true,
+		Hooks: map[string]events.Handler{
+			"onRecordCreate": {
+				ID: "record-create-handler",
+				Func: func(e events.Event) error {
+					called = true
+					return e.Next()
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register plugin: %v", err)
+	}
+
+	app.wirePluginHooks()
+	triggerErr := app.OnRecordCreate().Trigger(&events.RecordEvent{CollectionName: "posts", RecordID: "rec1"}, func(e events.Event) error {
+		return e.Next()
+	})
+	if triggerErr != nil {
+		t.Fatalf("trigger: %v", triggerErr)
+	}
+	if !called {
+		t.Fatal("expected plugin hook to be dispatched")
+	}
+}
+
+func TestApp_RegisterPluginBindsHooksImmediately(t *testing.T) {
+	cfg := &config.Config{Addr: ":8080", LogLevel: "info"}
+	app, _ := New(cfg)
+
+	called := false
+	p := plugin.New("test.plugin", "Test Plugin", "0.0.1").HookFunc("onRecordCreate", "hook-id", events.PriorityDefault, func(e events.Event) error {
+		called = true
+		return e.Next()
+	})
+	if err := app.RegisterPlugin(p); err != nil {
+		t.Fatalf("register plugin: %v", err)
+	}
+
+	if err := app.OnRecordCreate().Trigger(&events.RecordEvent{CollectionName: "posts", RecordID: "rec1"}, func(e events.Event) error { return e.Next() }); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	if !called {
+		t.Fatal("expected plugin hook to be bound immediately")
+	}
+}
+
+func TestApp_DisabledPluginHooksAreSkippedAfterBinding(t *testing.T) {
+	cfg := &config.Config{Addr: ":8080", LogLevel: "info"}
+	app, _ := New(cfg)
+
+	called := false
+	p := plugin.New("test.plugin", "Test Plugin", "0.0.1").HookFunc("onRecordCreate", "hook-id", events.PriorityDefault, func(e events.Event) error {
+		called = true
+		return e.Next()
+	})
+	if err := app.RegisterPlugin(p); err != nil {
+		t.Fatalf("register plugin: %v", err)
+	}
+	if err := app.Plugins().Disable(p.ID); err != nil {
+		t.Fatalf("disable plugin: %v", err)
+	}
+
+	if err := app.OnRecordCreate().Trigger(&events.RecordEvent{CollectionName: "posts", RecordID: "rec1"}, func(e events.Event) error { return e.Next() }); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	if called {
+		t.Fatal("expected disabled plugin hook to be skipped")
+	}
+}
+
+func TestApp_UnregisteredPluginHooksAreSkippedAfterBinding(t *testing.T) {
+	cfg := &config.Config{Addr: ":8080", LogLevel: "info"}
+	app, _ := New(cfg)
+
+	called := false
+	p := plugin.New("test.plugin", "Test Plugin", "0.0.1").HookFunc("onRecordCreate", "hook-id", events.PriorityDefault, func(e events.Event) error {
+		called = true
+		return e.Next()
+	})
+	if err := app.RegisterPlugin(p); err != nil {
+		t.Fatalf("register plugin: %v", err)
+	}
+	app.Plugins().Unregister(p.ID)
+
+	if err := app.OnRecordCreate().Trigger(&events.RecordEvent{CollectionName: "posts", RecordID: "rec1"}, func(e events.Event) error { return e.Next() }); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	if called {
+		t.Fatal("expected unregistered plugin hook to be skipped")
+	}
 }
 
 func TestApp_ShutdownWithoutBootstrap(t *testing.T) {

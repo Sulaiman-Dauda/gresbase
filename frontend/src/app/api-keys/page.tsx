@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { AppLayout } from '@/components/layout/app-layout'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -15,9 +16,27 @@ interface ApiKeyData {
   id: string
   name: string
   prefix: string
+  permissions?: string[]
+  last_used_at?: string
+  expires_at?: string
   created_at: string
   key?: string
 }
+
+const API_KEY_PERMISSION_OPTIONS = [
+  { value: 'collections.read', label: 'Collections read' },
+  { value: 'collections.write', label: 'Collections write' },
+  { value: 'records.read', label: 'Records read' },
+  { value: 'records.write', label: 'Records write' },
+  { value: 'files.write', label: 'Files write' },
+  { value: 'logs.read', label: 'Logs read' },
+  { value: 'settings.read', label: 'Settings read' },
+  { value: 'settings.write', label: 'Settings write' },
+  { value: 'api_keys.read', label: 'API keys read' },
+  { value: 'api_keys.write', label: 'API keys write' },
+  { value: 'backups.read', label: 'Backups read' },
+  { value: 'backups.write', label: 'Backups write' },
+]
 
 export default function ApiKeysPage() {
   const [keys, setKeys] = useState<ApiKeyData[]>([])
@@ -25,6 +44,7 @@ export default function ApiKeysPage() {
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [newName, setNewName] = useState('')
+  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
   const [newKey, setNewKey] = useState<string | null>(null)
   const [showKey, setShowKey] = useState<Record<string, boolean>>({})
@@ -48,8 +68,9 @@ export default function ApiKeysPage() {
     if (!newName.trim()) return
     setCreating(true)
     try {
-      const result = await api.createApiKey(newName.trim())
+      const result = await api.createApiKey(newName.trim(), selectedPermissions)
       setNewName('')
+      setSelectedPermissions([])
       setShowCreate(false)
       setNewKey(result.key || null)
       fetchKeys()
@@ -86,7 +107,8 @@ export default function ApiKeysPage() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <AppLayout>
+      <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">API Keys</h1>
@@ -120,7 +142,7 @@ export default function ApiKeysPage() {
               <span className="font-medium text-emerald-600">API Key Generated</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              Copy this key now. You won't be able to see it again.
+              Copy this key now. You won&apos;t be able to see it again.
             </p>
             <div className="flex items-center gap-2">
               <code className="flex-1 rounded-lg bg-muted px-3 py-2 text-sm font-mono break-all">
@@ -155,8 +177,8 @@ export default function ApiKeysPage() {
           <CardHeader>
             <CardTitle className="text-sm font-medium">Generate New API Key</CardTitle>
           </CardHeader>
-          <CardContent className="flex items-end gap-3">
-            <div className="flex-1 space-y-2">
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
               <label className="text-xs text-muted-foreground">Key Name</label>
               <Input
                 placeholder="e.g. Mobile App, CI/CD Pipeline"
@@ -165,10 +187,43 @@ export default function ApiKeysPage() {
                 onKeyDown={e => e.key === 'Enter' && handleCreate()}
               />
             </div>
-            <Button onClick={handleCreate} disabled={creating || !newName.trim()} size="sm">
-              {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-              Generate
-            </Button>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-muted-foreground">Permissions</label>
+                <span className="text-[11px] text-muted-foreground">
+                  {selectedPermissions.length === 0 ? 'No scopes selected — inherits full owner-role access' : `${selectedPermissions.length} selected`}
+                </span>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {API_KEY_PERMISSION_OPTIONS.map((option) => {
+                  const checked = selectedPermissions.includes(option.value)
+                  return (
+                    <label key={option.value} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => {
+                          setSelectedPermissions((current) =>
+                            event.target.checked
+                              ? [...current, option.value].sort()
+                              : current.filter((value) => value !== option.value)
+                          )
+                        }}
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button onClick={handleCreate} disabled={creating || !newName.trim()} size="sm">
+                {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+                Generate
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -195,14 +250,14 @@ export default function ApiKeysPage() {
                 <Key className="h-5 w-5 text-amber-500" />
               </div>
 
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 space-y-2">
                 <div className="flex items-center gap-2">
                   <h3 className="font-medium">{key.name}</h3>
                   <Badge variant="outline" className="font-mono text-[10px]">
                     {key.prefix}...
                   </Badge>
                 </div>
-                <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <Shield className="h-3 w-3" />
                     <code className="text-[10px] bg-muted px-1 rounded">gb_</code> prefix
@@ -211,6 +266,25 @@ export default function ApiKeysPage() {
                     <Clock className="h-3 w-3" />
                     Created {new Date(key.created_at).toLocaleDateString()}
                   </span>
+                  {key.last_used_at ? (
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Last used {new Date(key.last_used_at).toLocaleDateString()}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {key.permissions?.length ? (
+                    key.permissions.map((permission) => (
+                      <Badge key={permission} variant="secondary" className="text-[10px] font-normal">
+                        {permission}
+                      </Badge>
+                    ))
+                  ) : (
+                    <Badge variant="secondary" className="text-[10px] font-normal">
+                      Unscoped · inherits owner role access
+                    </Badge>
+                  )}
                 </div>
               </div>
 
@@ -265,5 +339,6 @@ client.auth.setToken('gb_your_api_key_here')`}</pre>
         </CardContent>
       </Card>
     </div>
+    </AppLayout>
   )
 }

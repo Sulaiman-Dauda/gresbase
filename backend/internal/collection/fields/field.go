@@ -87,18 +87,18 @@ func NewBaseField(name string, typ FieldType) BaseField {
 	}
 }
 
-func (f *BaseField) ID() string            { return f.id }
-func (f *BaseField) Name() string          { return f.name }
-func (f *BaseField) Type() FieldType       { return f.typ }
-func (f *BaseField) System() bool          { return f.system }
-func (f *BaseField) Required() bool        { return f.required }
-func (f *BaseField) Unique() bool          { return f.unique }
+func (f *BaseField) ID() string              { return f.id }
+func (f *BaseField) Name() string            { return f.name }
+func (f *BaseField) Type() FieldType         { return f.typ }
+func (f *BaseField) System() bool            { return f.system }
+func (f *BaseField) Required() bool          { return f.required }
+func (f *BaseField) Unique() bool            { return f.unique }
 func (f *BaseField) Options() map[string]any { return f.options }
 
-func (f *BaseField) SetRequired(v bool)   { f.required = v }
-func (f *BaseField) SetUnique(v bool)     { f.unique = v }
-func (f *BaseField) SetSystem(v bool)     { f.system = v }
-func (f *BaseField) SetID(id string)      { f.id = id }
+func (f *BaseField) SetRequired(v bool) { f.required = v }
+func (f *BaseField) SetUnique(v bool)   { f.unique = v }
+func (f *BaseField) SetSystem(v bool)   { f.system = v }
+func (f *BaseField) SetID(id string)    { f.id = id }
 
 func (f *BaseField) SetOptions(opts map[string]any) {
 	if opts == nil {

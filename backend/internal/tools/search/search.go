@@ -22,9 +22,9 @@ func NewProvider(db *database.DB) *Provider {
 // IndexConfig configures a full-text search index on a collection.
 type IndexConfig struct {
 	Collection string   `json:"collection"`
-	Fields     []string `json:"fields"`     // Fields to index
-	Language   string   `json:"language"`   // PostgreSQL text search language (default: 'english')
-	Weight     string   `json:"weight"`     // Weight labels like 'A', 'B', 'C', 'D'
+	Fields     []string `json:"fields"`   // Fields to index
+	Language   string   `json:"language"` // PostgreSQL text search language (default: 'english')
+	Weight     string   `json:"weight"`   // Weight labels like 'A', 'B', 'C', 'D'
 }
 
 // CreateIndex creates a tsvector index on the specified collection fields.
@@ -57,7 +57,9 @@ func (p *Provider) CreateIndex(ctx context.Context, config IndexConfig) error {
 		"ALTER TABLE %s DROP COLUMN IF EXISTS _fts CASCADE",
 		p.quoteIdent(config.Collection),
 	)
-	p.db.Exec(ctx, updateSQL)
+	if err := p.db.Exec(ctx, updateSQL); err != nil {
+		return fmt.Errorf("failed to drop existing _fts column: %w", err)
+	}
 
 	addSQL := fmt.Sprintf(
 		"ALTER TABLE %s ADD COLUMN _fts TSVECTOR GENERATED ALWAYS AS (%s) STORED",
@@ -83,12 +85,12 @@ func (p *Provider) CreateIndex(ctx context.Context, config IndexConfig) error {
 // SearchQuery performs a full-text search on a collection.
 type SearchQuery struct {
 	Collection string `json:"collection"`
-	Query      string `json:"query"`      // Natural language query
-	Language   string `json:"language"`   // Default 'english'
+	Query      string `json:"query"`    // Natural language query
+	Language   string `json:"language"` // Default 'english'
 	Page       int    `json:"page"`
 	PerPage    int    `json:"per_page"`
-	Highlight  bool   `json:"highlight"`  // Include ts_headline
-	Rank       bool   `json:"rank"`       // Include ts_rank
+	Highlight  bool   `json:"highlight"` // Include ts_headline
+	Rank       bool   `json:"rank"`      // Include ts_rank
 }
 
 // SearchResult represents a search hit.
@@ -120,7 +122,7 @@ func (p *Provider) Search(ctx context.Context, q SearchQuery) ([]SearchResult, i
 		"SELECT COUNT(*) FROM %s WHERE _fts @@ to_tsquery('%s', $1)",
 		p.quoteIdent(q.Collection), q.Language,
 	)
-	if err := p.db.Pool.QueryRow(ctx, countSQL, tsQuery).Scan(&total); err != nil {
+	if err := p.db.QueryRow(ctx, countSQL, tsQuery).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("search count failed: %w", err)
 	}
 
@@ -141,11 +143,17 @@ func (p *Provider) Search(ctx context.Context, q SearchQuery) ([]SearchResult, i
 		strings.Join(selectParts, ", "),
 		p.quoteIdent(q.Collection),
 		q.Language,
-		func() string { if q.Rank { return "_rank" } else { return "created_at" } }(),
+		func() string {
+			if q.Rank {
+				return "_rank"
+			} else {
+				return "created_at"
+			}
+		}(),
 		q.PerPage, offset,
 	)
 
-	rows, err := p.db.Pool.Query(ctx, searchSQL, tsQuery)
+	rows, err := p.db.Query(ctx, searchSQL, tsQuery)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search failed: %w", err)
 	}
@@ -164,7 +172,7 @@ func (p *Provider) Search(ctx context.Context, q SearchQuery) ([]SearchResult, i
 		var headline string
 
 		for i, col := range cols {
-			name := string(col.Name)
+			name := col.Name
 			switch name {
 			case "_rank":
 				if v, ok := vals[i].(float64); ok {

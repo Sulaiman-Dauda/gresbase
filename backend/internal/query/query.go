@@ -5,7 +5,9 @@ package query
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -13,17 +15,18 @@ import (
 	"github.com/gresbase/gresbase/internal/database"
 	"github.com/gresbase/gresbase/internal/filter"
 	"github.com/jackc/pgx/v5"
+	"github.com/rs/zerolog/log"
 )
 
 // Params represents query parameters from the HTTP request.
 type Params struct {
-	Filter  string `json:"filter"`
-	Sort    string `json:"sort"`
-	Expand  string `json:"expand"`
-	Fields  string `json:"fields"`
-	Page    int    `json:"page"`
-	PerPage int    `json:"perPage"`
-	SkipTotal bool `json:"skipTotal"`
+	Filter    string `json:"filter"`
+	Sort      string `json:"sort"`
+	Expand    string `json:"expand"`
+	Fields    string `json:"fields"`
+	Page      int    `json:"page"`
+	PerPage   int    `json:"perPage"`
+	SkipTotal bool   `json:"skipTotal"`
 }
 
 // DefaultParams creates query params with defaults.
@@ -34,7 +37,7 @@ func DefaultParams() Params {
 	}
 }
 
-// ParseParams extracts query params from a URL query string.
+// ParseParams extracts and URL-decodes query params from a raw query string.
 func ParseParams(rawQuery string) Params {
 	p := DefaultParams()
 
@@ -42,38 +45,38 @@ func ParseParams(rawQuery string) Params {
 		return p
 	}
 
-	// Parse the raw query string manually (net/url.ParseQuery but simple)
-	pairs := strings.Split(rawQuery, "&")
-	for _, pair := range pairs {
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		key, val := kv[0], kv[1]
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return p
+	}
 
-		switch key {
-		case "filter":
-			p.Filter = val
-		case "sort":
-			p.Sort = val
-		case "expand":
-			p.Expand = val
-		case "fields":
-			p.Fields = val
-		case "page":
-			if n, err := strconv.Atoi(val); err == nil && n > 0 {
-				p.Page = n
-			}
-		case "perPage":
-			if n, err := strconv.Atoi(val); err == nil && n > 0 {
-				if n > 500 {
-					n = 500
-				}
-				p.PerPage = n
-			}
-		case "skipTotal":
-			p.SkipTotal = val == "1" || val == "true"
+	if val := values.Get("filter"); val != "" {
+		p.Filter = val
+	}
+	if val := values.Get("sort"); val != "" {
+		p.Sort = val
+	}
+	if val := values.Get("expand"); val != "" {
+		p.Expand = val
+	}
+	if val := values.Get("fields"); val != "" {
+		p.Fields = val
+	}
+	if val := values.Get("page"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			p.Page = n
 		}
+	}
+	if val := values.Get("perPage"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			if n > 500 {
+				n = 500
+			}
+			p.PerPage = n
+		}
+	}
+	if val := values.Get("skipTotal"); val != "" {
+		p.SkipTotal = val == "1" || strings.EqualFold(val, "true")
 	}
 
 	return p
@@ -120,7 +123,7 @@ func (b *Builder) WithAccessRule(rule string) *Builder {
 		return b
 	}
 
-	sql, args, err := filter.FilterToSQL(expr, nil)
+	sql, args, err := filter.FilterToSQLOffset(expr, nil, len(b.whereArgs)+1)
 	if err != nil {
 		return b
 	}
@@ -143,7 +146,7 @@ func (b *Builder) BuildWhere(ctx context.Context) error {
 			return fmt.Errorf("invalid filter: %w", err)
 		}
 
-		sql, args, err := filter.FilterToSQL(expr, nil)
+		sql, args, err := filter.FilterToSQLOffset(expr, nil, len(b.whereArgs)+1)
 		if err != nil {
 			return fmt.Errorf("invalid filter: %w", err)
 		}
@@ -215,12 +218,13 @@ func (b *Builder) List(ctx context.Context) ([]map[string]any, int, error) {
 		whereSQL = "TRUE"
 	}
 
-	// Count total (unless skipped)
+	// Count total (unless skipped). Listing is replica-safe: it never feeds
+	// a write decision, so it may route to a configured read replica.
 	total := 0
 	if !b.params.SkipTotal {
 		countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s",
 			QuoteIdent(tableName), whereSQL)
-		if err := b.db.Pool.QueryRow(ctx, countSQL, b.whereArgs...).Scan(&total); err != nil {
+		if err := b.db.ReadQueryRow(ctx, countSQL, b.whereArgs...).Scan(&total); err != nil {
 			return nil, 0, fmt.Errorf("count query: %w", err)
 		}
 	}
@@ -233,7 +237,7 @@ func (b *Builder) List(ctx context.Context) ([]map[string]any, int, error) {
 		QuoteIdent(tableName), whereSQL, b.orderClause, b.params.PerPage, offset,
 	)
 
-	rows, err := b.db.Pool.Query(ctx, selectSQL, b.whereArgs...)
+	rows, err := b.db.ReadQuery(ctx, selectSQL, b.whereArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list query: %w", err)
 	}
@@ -255,7 +259,8 @@ func (b *Builder) List(ctx context.Context) ([]map[string]any, int, error) {
 	// Expand relations if requested
 	if b.params.Expand != "" && len(records) > 0 {
 		if err := b.expandRelations(ctx, records); err != nil {
-			// Non-fatal - return records without expanded relations
+			// Non-fatal: return records without expanded relations.
+			log.Warn().Err(err).Msg("query: relation expansion failed; returning unexpanded records")
 		}
 	}
 
@@ -269,9 +274,9 @@ func (b *Builder) Get(ctx context.Context, id string) (map[string]any, error) {
 		QuoteIdent(tableName))
 
 	var raw json.RawMessage
-	err := b.db.Pool.QueryRow(ctx, selectSQL, id).Scan(&raw)
+	err := b.db.QueryRow(ctx, selectSQL, id).Scan(&raw)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("record not found")
 		}
 		return nil, err
@@ -319,12 +324,14 @@ func (b *Builder) Create(ctx context.Context, record map[string]any) (map[string
 	)
 
 	var raw json.RawMessage
-	if err := b.db.Pool.QueryRow(ctx, sql, values...).Scan(&raw); err != nil {
+	if err := b.db.QueryRow(ctx, sql, values...).Scan(&raw); err != nil {
 		return nil, fmt.Errorf("create record: %w", err)
 	}
 
 	var result map[string]any
-	json.Unmarshal(raw, &result)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("create record: decode result: %w", err)
+	}
 	return result, nil
 }
 
@@ -368,15 +375,17 @@ func (b *Builder) Update(ctx context.Context, id string, record map[string]any) 
 	)
 
 	var raw json.RawMessage
-	if err := b.db.Pool.QueryRow(ctx, sql, values...).Scan(&raw); err != nil {
-		if err == pgx.ErrNoRows {
+	if err := b.db.QueryRow(ctx, sql, values...).Scan(&raw); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("record not found")
 		}
 		return nil, fmt.Errorf("update record: %w", err)
 	}
 
 	var result map[string]any
-	json.Unmarshal(raw, &result)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("update record: decode result: %w", err)
+	}
 	return result, nil
 }
 
@@ -384,7 +393,7 @@ func (b *Builder) Update(ctx context.Context, id string, record map[string]any) 
 func (b *Builder) Delete(ctx context.Context, id string) error {
 	tableName := b.collection.Name
 	sql := fmt.Sprintf("DELETE FROM %s WHERE id = $1", QuoteIdent(tableName))
-	result, err := b.db.Pool.Exec(ctx, sql, id)
+	result, err := b.db.ExecResult(ctx, sql, id)
 	if err != nil {
 		return fmt.Errorf("delete record: %w", err)
 	}
@@ -403,108 +412,224 @@ func (b *Builder) expandRelations(ctx context.Context, records []map[string]any)
 		return nil
 	}
 
-	expandFields := strings.Split(b.params.Expand, ",")
-
-	// Map of collection names to relation fields
-	relFieldMap := make(map[string]string) // fieldName -> relatedCollectionName
-	for _, sf := range b.collection.Schema {
-		if sf.Type == collection.FieldRelation {
-			if collName, ok := sf.Options["collection_id"].(string); ok {
-				relFieldMap[sf.Name] = collName
-			}
-		}
-	}
-
-	for _, ef := range expandFields {
-		ef = strings.TrimSpace(ef)
-		if ef == "" {
+	for _, fieldName := range strings.Split(b.params.Expand, ",") {
+		fieldName = strings.TrimSpace(fieldName)
+		if fieldName == "" {
 			continue
 		}
 
-		relatedColl, ok := relFieldMap[ef]
-		if !ok {
+		schemaField := b.getSchemaField(fieldName)
+		if schemaField == nil || schemaField.Type != collection.FieldRelation {
 			continue
 		}
 
-		// For each record, fetch the related record(s)
+		relatedCollectionName, err := b.resolveRelatedCollectionName(ctx, schemaField)
+		if err != nil || relatedCollectionName == "" {
+			continue
+		}
+
+		idSet := make(map[string]struct{})
 		for _, record := range records {
-			relValue, exists := record[ef]
-			if !exists || relValue == nil {
+			for _, id := range relationIDs(record[fieldName]) {
+				idSet[id] = struct{}{}
+			}
+		}
+		if len(idSet) == 0 {
+			continue
+		}
+
+		ids := make([]string, 0, len(idSet))
+		for id := range idSet {
+			ids = append(ids, id)
+		}
+
+		placeholders := make([]string, len(ids))
+		args := make([]any, len(ids))
+		for i, id := range ids {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+			args[i] = id
+		}
+
+		rows, err := b.db.Query(ctx,
+			fmt.Sprintf("SELECT row_to_json(t) FROM (SELECT * FROM %s WHERE id IN (%s)) t", QuoteIdent(relatedCollectionName), strings.Join(placeholders, ", ")),
+			args...,
+		)
+		if err != nil {
+			continue
+		}
+
+		relatedMap := make(map[string]map[string]any, len(ids))
+		for rows.Next() {
+			var raw json.RawMessage
+			if err := rows.Scan(&raw); err != nil {
+				continue
+			}
+			var rec map[string]any
+			if err := json.Unmarshal(raw, &rec); err != nil {
+				continue
+			}
+			id := strings.TrimSpace(fmt.Sprint(rec["id"]))
+			if id == "" {
+				continue
+			}
+			rec["_label"] = queryRelationLabel(rec, schemaField)
+			relatedMap[id] = rec
+		}
+		rows.Close()
+
+		single := relationMaxSelect(schemaField) <= 1
+		for _, record := range records {
+			if record["expand"] == nil {
+				record["expand"] = make(map[string]any)
+			}
+			expandMap, _ := record["expand"].(map[string]any)
+			if expandMap == nil {
+				expandMap = make(map[string]any)
+				record["expand"] = expandMap
+			}
+
+			ids := relationIDs(record[fieldName])
+			if single {
+				if len(ids) > 0 {
+					expandMap[fieldName] = relatedMap[ids[0]]
+				}
 				continue
 			}
 
-			// Handle both single and multiple relations
-			var ids []string
-			switch v := relValue.(type) {
-			case string:
-				if v != "" {
-					ids = []string{v}
-				}
-			case []any:
-				for _, item := range v {
-					ids = append(ids, fmt.Sprintf("%v", item))
-				}
-			case []string:
-				ids = v
-			}
-
-			if len(ids) == 0 {
-				continue
-			}
-
-			// Fetch related records
-			placeholders := make([]string, len(ids))
-			args := make([]any, len(ids))
-			for i, id := range ids {
-				placeholders[i] = fmt.Sprintf("$%d", i+1)
-				args[i] = id
-			}
-
-			sql := fmt.Sprintf(
-				"SELECT row_to_json(t) FROM (SELECT * FROM %s WHERE id IN (%s)) t",
-				QuoteIdent(relatedColl),
-				strings.Join(placeholders, ", "),
-			)
-
-			rows, err := b.db.Pool.Query(ctx, sql, args...)
-			if err != nil {
-				continue
-			}
-
-			var relatedRecords []map[string]any
-			for rows.Next() {
-				var raw json.RawMessage
-				if err := rows.Scan(&raw); err != nil {
-					continue
-				}
-				var rec map[string]any
-				json.Unmarshal(raw, &rec)
-				relatedRecords = append(relatedRecords, rec)
-			}
-			rows.Close()
-
-			// Attach to record under "expand" key
-			if record["@expand"] == nil {
-				record["@expand"] = make(map[string]any)
-			}
-			expandMap := record["@expand"].(map[string]any)
-
-			// If it's a single relation (MaxSelect == 1), return single object
-			sf := b.getSchemaField(ef)
-			if sf != nil {
-				if maxSelect, ok := sf.Options["max_select"]; ok {
-					if ms, ok := maxSelect.(float64); ok && ms == 1 && len(relatedRecords) > 0 {
-						expandMap[ef] = relatedRecords[0]
-						continue
-					}
+			expanded := make([]map[string]any, 0, len(ids))
+			for _, id := range ids {
+				if rec, ok := relatedMap[id]; ok {
+					expanded = append(expanded, rec)
 				}
 			}
-
-			expandMap[ef] = relatedRecords
+			expandMap[fieldName] = expanded
 		}
 	}
 
 	return nil
+}
+
+func (b *Builder) resolveRelatedCollectionName(ctx context.Context, field *collection.SchemaField) (string, error) {
+	if field == nil {
+		return "", fmt.Errorf("missing relation field")
+	}
+	if field.Options != nil {
+		if name, _ := field.Options["collection_name"].(string); name != "" {
+			return name, nil
+		}
+		if name, _ := field.Options["collection"].(string); name != "" {
+			return name, nil
+		}
+		if raw, _ := field.Options["collection_id"].(string); raw != "" {
+			var name string
+			if err := b.db.QueryRow(ctx, `SELECT name FROM _collections WHERE id = $1 OR name = $1 LIMIT 1`, raw).Scan(&name); err == nil && name != "" {
+				field.Options["collection_name"] = name
+				return name, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("relation target not found")
+}
+
+// RelationIDs extracts relation id values from a stored record value
+// (single TEXT id, JSONB array, or string slice).
+func RelationIDs(value any) []string { return relationIDs(value) }
+
+// RelationLabel computes the display label for an expanded relation record.
+func RelationLabel(record map[string]any, field *collection.SchemaField) string {
+	return queryRelationLabel(record, field)
+}
+
+// RelationMaxSelect reports the max_select option of a relation field (1 = single).
+func RelationMaxSelect(field *collection.SchemaField) int { return relationMaxSelect(field) }
+
+func relationIDs(value any) []string {
+	switch v := value.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		return []string{v}
+	case []string:
+		result := make([]string, 0, len(v))
+		for _, id := range v {
+			if strings.TrimSpace(id) != "" {
+				result = append(result, id)
+			}
+		}
+		return result
+	case []any:
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if id := strings.TrimSpace(fmt.Sprint(item)); id != "" {
+				result = append(result, id)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func relationMaxSelect(field *collection.SchemaField) int {
+	if field == nil || field.Options == nil {
+		return 1
+	}
+	switch v := field.Options["max_select"].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 1
+	}
+}
+
+func queryRelationLabel(record map[string]any, field *collection.SchemaField) string {
+	if field == nil {
+		return strings.TrimSpace(fmt.Sprint(record["id"]))
+	}
+	displayFields := []string{}
+	if field.Options != nil {
+		switch raw := field.Options["display_fields"].(type) {
+		case []string:
+			displayFields = raw
+		case []any:
+			for _, item := range raw {
+				value := strings.TrimSpace(fmt.Sprint(item))
+				if value != "" {
+					displayFields = append(displayFields, value)
+				}
+			}
+		case string:
+			for _, item := range strings.Split(raw, ",") {
+				item = strings.TrimSpace(item)
+				if item != "" {
+					displayFields = append(displayFields, item)
+				}
+			}
+		}
+	}
+	if len(displayFields) == 0 {
+		for _, candidate := range []string{"title", "name", "label", "email", "username"} {
+			if value := strings.TrimSpace(fmt.Sprint(record[candidate])); value != "" && value != "<nil>" {
+				return value
+			}
+		}
+		return strings.TrimSpace(fmt.Sprint(record["id"]))
+	}
+	parts := make([]string, 0, len(displayFields))
+	for _, key := range displayFields {
+		if value := strings.TrimSpace(fmt.Sprint(record[key])); value != "" && value != "<nil>" {
+			parts = append(parts, value)
+		}
+	}
+	if len(parts) == 0 {
+		return strings.TrimSpace(fmt.Sprint(record["id"]))
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (b *Builder) getSchemaField(name string) *collection.SchemaField {

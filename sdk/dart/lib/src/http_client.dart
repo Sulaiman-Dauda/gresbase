@@ -1,190 +1,190 @@
-/// HTTP client for Gresbase Dart SDK with auto-refresh token handling.
-library gresbase_sdk_http;
+/// Internal HTTP layer with auth token injection and auto-refresh on 401.
+library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
-/// HTTP client wrapper with auth token management.
-class HttpClient {
+import 'package:http/http.dart' as http;
+
+import 'models.dart';
+
+/// Internal HTTP client used by all SDK services.
+///
+/// Wraps a `package:http` [http.Client] (injectable for testing), attaches
+/// the bearer token from the shared token store, and transparently refreshes
+/// the access token once on a 401 response before retrying the request.
+class GresbaseHttpClient {
+  /// Base URL of the Gresbase server, without trailing slash.
   final String baseUrl;
-  final String Function()? getToken;
-  final Future<String?> Function()? onRefresh;
-  final HttpClient Function()? _clientFactory;
 
-  HttpClient._({
-    required this.baseUrl,
-    this.getToken,
-    this.onRefresh,
-    HttpClient Function()? clientFactory,
-  }) : _clientFactory = clientFactory;
+  final http.Client _client;
 
-  factory HttpClient({
+  /// Resolves the current access token (read lazily per request).
+  String? Function() getToken;
+
+  /// Resolves the current refresh token.
+  String? Function() getRefreshToken;
+
+  /// Performs a token refresh; returns the new access token or null.
+  Future<String?> Function()? onRefresh;
+
+  GresbaseHttpClient({
     required String baseUrl,
-    String Function()? getToken,
-    Future<String?> Function()? onRefresh,
-  }) {
-    return HttpClient._(
-      baseUrl: baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl,
-      getToken: getToken,
-      onRefresh: onRefresh,
-    );
-  }
+    http.Client? client,
+    String? Function()? getToken,
+    String? Function()? getRefreshToken,
+    this.onRefresh,
+  })  : baseUrl = baseUrl.endsWith('/')
+            ? baseUrl.substring(0, baseUrl.length - 1)
+            : baseUrl,
+        _client = client ?? http.Client(),
+        getToken = getToken ?? (() => null),
+        getRefreshToken = getRefreshToken ?? (() => null);
 
-  Future<HttpClientRequest> _createRequest(String method, String path) async {
-    final client = _clientFactory?.call() ?? HttpClient();
+  /// The underlying `package:http` client (also used for SSE streaming).
+  http.Client get rawClient => _client;
+
+  Uri buildUri(String path, [Map<String, String>? query]) {
     final uri = Uri.parse('$baseUrl$path');
-    final request = await client.openUrl(method, uri);
-    request.headers.set('Content-Type', 'application/json');
-    request.headers.set('Accept', 'application/json');
+    if (query == null || query.isEmpty) return uri;
+    return uri.replace(queryParameters: {...uri.queryParameters, ...query});
+  }
 
-    final token = getToken?.call();
+  /// Send a JSON request and decode the JSON response.
+  ///
+  /// Returns the decoded body (`Map`, `List`, ...) or `null` for empty/204
+  /// responses. Throws [GresbaseException] on non-2xx status codes.
+  ///
+  /// Set [retryOn401] to false to bypass the auto-refresh interceptor
+  /// (used by the token refresh request itself to avoid recursion).
+  Future<dynamic> send(
+    String method,
+    String path, {
+    Object? body,
+    Map<String, String>? query,
+    Map<String, String>? headers,
+    bool retryOn401 = true,
+  }) async {
+    var response = await _attempt(method, path,
+        body: body, query: query, headers: headers);
+
+    // Auto-refresh once on 401, then retry the original request.
+    if (retryOn401 &&
+        response.statusCode == 401 &&
+        getRefreshToken() != null &&
+        onRefresh != null) {
+      final newToken = await onRefresh!();
+      if (newToken != null) {
+        response = await _attempt(method, path,
+            body: body, query: query, headers: headers);
+      }
+    }
+
+    return _decode(response);
+  }
+
+  /// Upload a file as `multipart/form-data`.
+  Future<dynamic> multipart(
+    String path, {
+    required List<int> fileBytes,
+    required String filename,
+    String fileField = 'file',
+    Map<String, String>? fields,
+  }) async {
+    var response = await _attemptMultipart(path,
+        fileBytes: fileBytes,
+        filename: filename,
+        fileField: fileField,
+        fields: fields);
+
+    if (response.statusCode == 401 &&
+        getRefreshToken() != null &&
+        onRefresh != null) {
+      final newToken = await onRefresh!();
+      if (newToken != null) {
+        response = await _attemptMultipart(path,
+            fileBytes: fileBytes,
+            filename: filename,
+            fileField: fileField,
+            fields: fields);
+      }
+    }
+
+    return _decode(response);
+  }
+
+  Future<http.Response> _attempt(
+    String method,
+    String path, {
+    Object? body,
+    Map<String, String>? query,
+    Map<String, String>? headers,
+  }) async {
+    final request = http.Request(method, buildUri(path, query));
+    request.headers['Accept'] = 'application/json';
+    if (headers != null) request.headers.addAll(headers);
+
+    final token = getToken();
     if (token != null && token.isNotEmpty) {
-      request.headers.set('Authorization', 'Bearer $token');
+      request.headers['Authorization'] = 'Bearer $token';
     }
-
-    return request;
-  }
-
-  Future<Map<String, dynamic>> request(
-    String method,
-    String path, {
-    Map<String, dynamic>? body,
-    Map<String, String>? queryParams,
-  }) async {
-    final fullPath = queryParams != null && queryParams.isNotEmpty
-        ? '$path?${Uri(queryParameters: queryParams).query}'
-        : path;
-
-    var response = await _send(method, fullPath, body: body);
-
-    // Auto-refresh on 401
-    if (response.statusCode == 401 && onRefresh != null) {
-      final newToken = await onRefresh!();
-      if (newToken != null) {
-        response = await _send(method, fullPath, body: body);
-      }
-    }
-
-    if (response.statusCode >= 400) {
-      String message = 'HTTP ${response.statusCode}';
-      try {
-        final errorBody = await response.transform(utf8.decoder).join();
-        final errorJson = jsonDecode(errorBody) as Map<String, dynamic>;
-        message = errorJson['message'] as String? ??
-            errorJson['error']?['message'] as String? ??
-            message;
-      } catch (_) {}
-      throw HttpException(message);
-    }
-
-    if (response.statusCode == 204) {
-      return {};
-    }
-
-    final bodyStr = await response.transform(utf8.decoder).join();
-    if (bodyStr.isEmpty) return {};
-    return jsonDecode(bodyStr) as Map<String, dynamic>;
-  }
-
-  Future<List<dynamic>> requestList(
-    String method,
-    String path, {
-    Map<String, dynamic>? body,
-    Map<String, String>? queryParams,
-  }) async {
-    final fullPath = queryParams != null && queryParams.isNotEmpty
-        ? '$path?${Uri(queryParameters: queryParams).query}'
-        : path;
-
-    var response = await _send(method, fullPath, body: body);
-
-    if (response.statusCode == 401 && onRefresh != null) {
-      final newToken = await onRefresh!();
-      if (newToken != null) {
-        response = await _send(method, fullPath, body: body);
-      }
-    }
-
-    if (response.statusCode >= 400) {
-      String message = 'HTTP ${response.statusCode}';
-      try {
-        final errorBody = await response.transform(utf8.decoder).join();
-        final errorJson = jsonDecode(errorBody) as Map<String, dynamic>;
-        message = errorJson['message'] as String? ?? message;
-      } catch (_) {}
-      throw HttpException(message);
-    }
-
-    final bodyStr = await response.transform(utf8.decoder).join();
-    if (bodyStr.isEmpty) return [];
-    final decoded = jsonDecode(bodyStr);
-    return decoded is List ? decoded : [];
-  }
-
-  Future<HttpClientResponse> _send(
-    String method,
-    String path, {
-    Map<String, dynamic>? body,
-  }) async {
-    final request = await _createRequest(method, path);
 
     if (body != null) {
-      final bodyStr = jsonEncode(body);
-      request.headers.set('Content-Length', bodyStr.length.toString());
-      request.write(bodyStr);
+      request.headers['Content-Type'] = 'application/json';
+      request.body = jsonEncode(body);
     }
 
-    return request.close();
+    final streamed = await _client.send(request);
+    return http.Response.fromStream(streamed);
   }
 
-  /// Upload a file using multipart form data.
-  Future<Map<String, dynamic>> upload(
-    String path,
-    List<int> fileBytes,
-    String filename, {
-    String fieldName = 'file',
+  Future<http.Response> _attemptMultipart(
+    String path, {
+    required List<int> fileBytes,
+    required String filename,
+    required String fileField,
+    Map<String, String>? fields,
   }) async {
-    final client = HttpClient();
-    final uri = Uri.parse('$baseUrl$path');
-    final request = await client.postUrl(uri);
+    final request = http.MultipartRequest('POST', buildUri(path));
+    request.files.add(
+        http.MultipartFile.fromBytes(fileField, fileBytes, filename: filename));
+    if (fields != null) request.fields.addAll(fields);
 
-    final boundary = 'gresbase-upload-${DateTime.now().millisecondsSinceEpoch}';
-    request.headers.set('Content-Type', 'multipart/form-data; boundary=$boundary');
-
-    final token = getToken?.call();
+    final token = getToken();
     if (token != null && token.isNotEmpty) {
-      request.headers.set('Authorization', 'Bearer $token');
+      request.headers['Authorization'] = 'Bearer $token';
     }
 
-    // Build multipart body
-    final body = <int>[];
-    body.addAll(utf8.encode('--$boundary\r\n'));
-    body.addAll(utf8.encode(
-        'Content-Disposition: form-data; name="$fieldName"; filename="$filename"\r\n'));
-    body.addAll(utf8.encode('Content-Type: application/octet-stream\r\n\r\n'));
-    body.addAll(fileBytes);
-    body.addAll(utf8.encode('\r\n--$boundary--\r\n'));
-
-    request.headers.set('Content-Length', body.length.toString());
-    request.add(body);
-
-    final response = await request.close();
-
-    if (response.statusCode >= 400) {
-      throw HttpException('Upload failed: HTTP ${response.statusCode}');
-    }
-
-    final bodyStr = await response.transform(utf8.decoder).join();
-    return jsonDecode(bodyStr) as Map<String, dynamic>;
+    final streamed = await _client.send(request);
+    return http.Response.fromStream(streamed);
   }
-}
 
-/// HTTP exception with message.
-class HttpException implements Exception {
-  final String message;
-  HttpException(this.message);
+  dynamic _decode(http.Response response) {
+    if (response.statusCode >= 400) {
+      var message = 'HTTP ${response.statusCode}';
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(utf8.decode(response.bodyBytes));
+        if (decoded is Map<String, dynamic>) {
+          final err = decoded['error'];
+          message = decoded['message'] as String? ??
+              (err is Map<String, dynamic>
+                  ? err['message'] as String?
+                  : null) ??
+              (err is String ? err : null) ??
+              message;
+        }
+      } catch (_) {}
+      throw GresbaseException(response.statusCode, message, decoded);
+    }
 
-  @override
-  String toString() => 'HttpException: $message';
+    if (response.statusCode == 204 || response.bodyBytes.isEmpty) {
+      return null;
+    }
+
+    return jsonDecode(utf8.decode(response.bodyBytes));
+  }
+
+  /// Close the underlying HTTP client.
+  void close() => _client.close();
 }

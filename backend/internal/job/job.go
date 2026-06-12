@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -28,7 +29,6 @@ type Job struct {
 
 	// Runtime fields
 	schedule *cron.Schedule
-	handlerFn func(ctx context.Context, data map[string]any) error
 }
 
 // Scheduler manages cron jobs with database persistence.
@@ -113,7 +113,7 @@ func (s *Scheduler) AddJob(ctx context.Context, name, cronExpr, handler string, 
 		schedule:  schedule,
 	}
 
-	_, err = s.db.Pool.Exec(ctx, `
+	err = s.db.Exec(ctx, `
 		INSERT INTO _jobs (id, name, cron_expr, handler, data, enabled, next_run_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		job.ID, job.Name, job.CronExpr, job.Handler, job.Data, job.Enabled, job.NextRunAt)
@@ -131,7 +131,7 @@ func (s *Scheduler) AddJob(ctx context.Context, name, cronExpr, handler string, 
 
 // LoadJobs loads all jobs from database into memory.
 func (s *Scheduler) LoadJobs(ctx context.Context) error {
-	rows, err := s.db.Pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id, name, cron_expr, handler, data, enabled, last_run_at, next_run_at, created_at, updated_at
 		FROM _jobs WHERE enabled = TRUE ORDER BY name`)
 	if err != nil {
@@ -162,7 +162,7 @@ func (s *Scheduler) LoadJobs(ctx context.Context) error {
 
 // ListJobs returns all jobs.
 func (s *Scheduler) ListJobs(ctx context.Context) ([]*Job, error) {
-	rows, err := s.db.Pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id, name, cron_expr, handler, data, enabled, last_run_at, next_run_at, created_at, updated_at
 		FROM _jobs ORDER BY name`)
 	if err != nil {
@@ -187,21 +187,98 @@ func (s *Scheduler) ListJobs(ctx context.Context) ([]*Job, error) {
 	return jobs, nil
 }
 
+// SetJobEnabled toggles a job. Disabled jobs are removed from the in-memory
+// schedule; re-enabling reloads and re-arms them.
+func (s *Scheduler) SetJobEnabled(ctx context.Context, id string, enabled bool) error {
+	if err := s.db.Exec(ctx,
+		"UPDATE _jobs SET enabled = $1, updated_at = NOW() WHERE id = $2", enabled, id); err != nil {
+		return err
+	}
+
+	if !enabled {
+		s.mu.Lock()
+		delete(s.jobs, id)
+		s.mu.Unlock()
+		return nil
+	}
+
+	job := &Job{}
+	err := s.db.QueryRow(ctx, `
+		SELECT id, name, cron_expr, handler, data, enabled, last_run_at, next_run_at, created_at, updated_at
+		FROM _jobs WHERE id = $1`, id).
+		Scan(&job.ID, &job.Name, &job.CronExpr, &job.Handler, &job.Data,
+			&job.Enabled, &job.LastRunAt, &job.NextRunAt, &job.CreatedAt, &job.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	schedule, err := cron.Parse(job.CronExpr)
+	if err != nil {
+		return fmt.Errorf("invalid cron expression %q: %w", job.CronExpr, err)
+	}
+	job.schedule = schedule
+	next := schedule.Next(time.Now())
+	job.NextRunAt = &next
+	_ = s.db.Exec(ctx, "UPDATE _jobs SET next_run_at = $1 WHERE id = $2", next, id)
+
+	s.mu.Lock()
+	s.jobs[id] = job
+	s.mu.Unlock()
+	return nil
+}
+
+// JobRun is a single execution record of a job.
+type JobRun struct {
+	ID         int64      `json:"id"`
+	JobID      string     `json:"job_id"`
+	Status     string     `json:"status"`
+	Output     string     `json:"output,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+}
+
+// ListRuns returns the most recent executions of a job.
+func (s *Scheduler) ListRuns(ctx context.Context, jobID string, limit int) ([]*JobRun, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT id, job_id, status, output, error, started_at, finished_at
+		FROM _job_runs WHERE job_id = $1 ORDER BY started_at DESC LIMIT $2`, jobID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	runs := []*JobRun{}
+	for rows.Next() {
+		run := &JobRun{}
+		if err := rows.Scan(&run.ID, &run.JobID, &run.Status, &run.Output, &run.Error,
+			&run.StartedAt, &run.FinishedAt); err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	return runs, nil
+}
+
 // DeleteJob removes a job.
 func (s *Scheduler) DeleteJob(ctx context.Context, id string) error {
 	s.mu.Lock()
 	delete(s.jobs, id)
 	s.mu.Unlock()
 
-	_, err := s.db.Pool.Exec(ctx, "DELETE FROM _jobs WHERE id = $1", id)
-	return err
+	return s.db.Exec(ctx, "DELETE FROM _jobs WHERE id = $1", id)
 }
 
 // RunJob triggers a job manually.
 func (s *Scheduler) RunJob(ctx context.Context, id string) error {
 	s.mu.RLock()
 	job, ok := s.jobs[id]
-	handlerFn := s.handlers[job.Handler]
+	var handlerFn func(ctx context.Context, data map[string]any) error
+	if ok {
+		handlerFn = s.handlers[job.Handler]
+	}
 	s.mu.RUnlock()
 
 	if !ok {
@@ -210,16 +287,19 @@ func (s *Scheduler) RunJob(ctx context.Context, id string) error {
 
 	now := time.Now()
 	var data map[string]any
-	json.Unmarshal([]byte(job.Data), &data)
+	// stored JSON; defaults to nil map if malformed
+	_ = json.Unmarshal([]byte(job.Data), &data)
 
 	// Record run start
 	var runID int64
-	s.db.Pool.QueryRow(ctx,
-		"INSERT INTO _job_runs (job_id, status) VALUES ($1, 'running') RETURNING id", id).Scan(&runID)
+	if err := s.db.QueryRow(ctx,
+		"INSERT INTO _job_runs (job_id, status) VALUES ($1, 'running') RETURNING id", id).Scan(&runID); err != nil {
+		return fmt.Errorf("create job run: %w", err)
+	}
 
 	var runErr error
 	if handlerFn != nil {
-		runErr = handlerFn(ctx, data)
+		runErr = safeCallHandler(ctx, job.Name, handlerFn, data)
 	} else {
 		log.Warn().Str("handler", job.Handler).Msg("No handler registered for job")
 	}
@@ -231,15 +311,19 @@ func (s *Scheduler) RunJob(ctx context.Context, id string) error {
 		status = "failed"
 		errMsg = runErr.Error()
 	}
-	s.db.Pool.Exec(ctx,
+	if err := s.db.Exec(ctx,
 		"UPDATE _job_runs SET status = $1, error = $2, finished_at = NOW() WHERE id = $3",
-		status, errMsg, runID)
+		status, errMsg, runID); err != nil {
+		return fmt.Errorf("update job run: %w", err)
+	}
 
 	// Schedule next run
 	if job.schedule != nil {
 		next := job.schedule.Next(now)
-		s.db.Pool.Exec(ctx, "UPDATE _jobs SET last_run_at = $1, next_run_at = $2, updated_at = NOW() WHERE id = $3",
-			now, next, id)
+		if err := s.db.Exec(ctx, "UPDATE _jobs SET last_run_at = $1, next_run_at = $2, updated_at = NOW() WHERE id = $3",
+			now, next, id); err != nil {
+			return fmt.Errorf("update job schedule: %w", err)
+		}
 	}
 
 	if runErr != nil {
@@ -295,8 +379,22 @@ func (s *Scheduler) checkAndRun() {
 		}
 		if now.After(*job.NextRunAt) || now.Equal(*job.NextRunAt) {
 			go func(j *Job) {
+				// Last line of defense: a panic escaping RunJob (e.g. from the
+				// persistence layer) must never kill the scheduler or server.
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error().
+							Str("name", j.Name).
+							Str("id", j.ID).
+							Interface("panic", r).
+							Bytes("stack", debug.Stack()).
+							Msg("Job run panicked; scheduler recovered")
+					}
+				}()
 				ctx := context.Background()
-				s.RunJob(ctx, j.ID)
+				if err := s.RunJob(ctx, j.ID); err != nil {
+					log.Warn().Err(err).Str("name", j.Name).Str("id", j.ID).Msg("Scheduled job run failed")
+				}
 			}(job)
 		}
 	}
@@ -315,4 +413,22 @@ func (s *Scheduler) GetNextRuns(cronExpr string, n int) ([]time.Time, error) {
 func (s *Scheduler) ValidateCron(cronExpr string) error {
 	_, err := cron.Parse(cronExpr)
 	return err
+}
+
+// safeCallHandler invokes a job handler and converts panics into errors so a
+// panicking job can never take down the scheduler (or the whole server). The
+// panic is logged with its stack trace and surfaces as a regular handler
+// error, which marks the job run as failed.
+func safeCallHandler(ctx context.Context, jobName string, fn func(ctx context.Context, data map[string]any) error, data map[string]any) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().
+				Str("name", jobName).
+				Interface("panic", r).
+				Bytes("stack", debug.Stack()).
+				Msg("Job handler panicked; scheduler recovered")
+			err = fmt.Errorf("job handler panicked: %v", r)
+		}
+	}()
+	return fn(ctx, data)
 }

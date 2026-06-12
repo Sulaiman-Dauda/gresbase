@@ -16,20 +16,20 @@ func TestDefaultParams(t *testing.T) {
 
 func TestParseParams(t *testing.T) {
 	tests := []struct {
-		raw       string
-		wantPage  int
+		raw         string
+		wantPage    int
 		wantPerPage int
-		wantFilter string
-		wantSort   string
-		wantExpand string
-		wantFields string
+		wantFilter  string
+		wantSort    string
+		wantExpand  string
+		wantFields  string
 	}{
 		{"", 1, 30, "", "", "", ""},
 		{"page=2&perPage=50", 2, 50, "", "", "", ""},
-		{"filter=status%3D%22active%22&sort=-created", 1, 30, "status%3D%22active%22", "-created", "", ""},
+		{"filter=status%3D%22active%22&sort=-created", 1, 30, `status="active"`, "-created", "", ""},
 		{"expand=author,category&fields=id,title", 1, 30, "", "", "author,category", "id,title"},
 		{"perPage=1000", 1, 500, "", "", "", ""}, // capped at 500
-		{"page=0", 1, 30, "", "", "", ""}, // page 0 becomes 1
+		{"page=0", 1, 30, "", "", "", ""},        // page 0 becomes 1
 		{"skipTotal=1", 1, 30, "", "", "", ""},
 	}
 

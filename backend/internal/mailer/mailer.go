@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"crypto/tls"
 	"fmt"
-	"html/template"
 	"net"
 	"net/mail"
 	"net/smtp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,14 +17,14 @@ import (
 
 // Message represents an email message.
 type Message struct {
-	From        mail.Address
-	To          []mail.Address
-	Cc          []mail.Address
-	Bcc         []mail.Address
-	Subject     string
-	HTML        string
-	Text        string
-	Headers     map[string]string
+	From    mail.Address
+	To      []mail.Address
+	Cc      []mail.Address
+	Bcc     []mail.Address
+	Subject string
+	HTML    string
+	Text    string
+	Headers map[string]string
 }
 
 // Sender is the interface for sending emails.
@@ -34,9 +34,9 @@ type Sender interface {
 
 // Service handles email delivery via SMTP or sendmail.
 type Service struct {
-	cfg      *config.Config
-	sender   Sender
-	tmpl     *template.Template
+	cfg       *config.Config
+	sender    Sender
+	overrides OverrideProvider
 }
 
 // NewService creates a new mailer service.
@@ -51,9 +51,6 @@ func NewService(cfg *config.Config) *Service {
 			password: cfg.SMTPPassword,
 		}
 	}
-
-	// Parse built-in email templates
-	s.tmpl = template.Must(template.New("mail").Parse(mailTemplates))
 
 	return s
 }
@@ -122,87 +119,67 @@ func (s *Service) SendEmailChangeConfirmation(to string, link string) error {
 // --- Convenience senders for auth flows ---
 
 func (s *Service) SendOTP(to string, code string) error {
-	body, _ := s.renderTemplate("otp", map[string]string{"Code": code, "AppName": "Gresbase"})
-	return s.Send(&Message{
-		To:      []mail.Address{{Address: to}},
-		Subject: "Your verification code",
-		HTML:    body,
-	})
+	return s.sendTemplated("otp", to, map[string]string{"Code": code, "AppName": "Gresbase"})
 }
 
 func (s *Service) SendMagicLink(to string, token string) error {
 	link := fmt.Sprintf("%s/auth/magic-link?token=%s", s.cfg.Domain, token)
-	body, _ := s.renderTemplate("magic_link", map[string]string{"Link": link, "AppName": "Gresbase"})
-	return s.Send(&Message{
-		To:      []mail.Address{{Address: to}},
-		Subject: "Your magic login link",
-		HTML:    body,
-	})
+	return s.sendTemplated("magic_link", to, map[string]string{"Link": link, "AppName": "Gresbase"})
 }
 
 func (s *Service) SendPasswordReset(to string, token string) error {
 	link := fmt.Sprintf("%s/auth/reset-password?token=%s", s.cfg.Domain, token)
-	body, _ := s.renderTemplate("password_reset", map[string]string{"Link": link, "AppName": "Gresbase"})
-	return s.Send(&Message{
-		To:      []mail.Address{{Address: to}},
-		Subject: "Reset your password",
-		HTML:    body,
-	})
+	return s.sendTemplated("password_reset", to, map[string]string{"Link": link, "AppName": "Gresbase"})
 }
 
 func (s *Service) SendVerification(to string, token string) error {
 	link := fmt.Sprintf("%s/auth/verify?token=%s", s.cfg.Domain, token)
-	body, _ := s.renderTemplate("verification", map[string]string{"Link": link, "AppName": "Gresbase"})
-	return s.Send(&Message{
-		To:      []mail.Address{{Address: to}},
-		Subject: "Verify your email",
-		HTML:    body,
-	})
+	return s.sendTemplated("verification", to, map[string]string{"Link": link, "AppName": "Gresbase"})
 }
 
 func (s *Service) SendEmailChange(to string, token string) error {
 	link := fmt.Sprintf("%s/auth/confirm-email-change?token=%s", s.cfg.Domain, token)
-	body, _ := s.renderTemplate("email_change", map[string]string{"Link": link, "AppName": "Gresbase"})
-	return s.Send(&Message{
-		To:      []mail.Address{{Address: to}},
-		Subject: "Confirm your new email address",
-		HTML:    body,
-	})
+	return s.sendTemplated("email_change", to, map[string]string{"Link": link, "AppName": "Gresbase"})
 }
 
 func (s *Service) SendAuthAlert(to string, info map[string]string) error {
-	body, _ := s.renderTemplate("auth_alert", map[string]string{
+	return s.sendTemplated("auth_alert", to, map[string]string{
 		"IP":        info["ip"],
 		"UserAgent": info["user_agent"],
 		"Time":      info["time"],
 		"AppName":   "Gresbase",
 	})
-	return s.Send(&Message{
-		To:      []mail.Address{{Address: to}},
-		Subject: "New login to your account",
-		HTML:    body,
-	})
 }
 
 func (s *Service) SendBackupNotification(to string, name string, size int64) error {
-	body, _ := s.renderTemplate("backup", map[string]any{
+	return s.sendTemplated("backup", to, map[string]string{
 		"Name":    name,
 		"Size":    formatBytes(size),
 		"AppName": "Gresbase",
 	})
-	return s.Send(&Message{
-		To:      []mail.Address{{Address: to}},
-		Subject: fmt.Sprintf("Backup completed: %s", name),
-		HTML:    body,
+}
+
+func (s *Service) SendBackupFailedAlert(to string, errMsg, when, instance string) error {
+	return s.sendTemplated("backup_failed", to, map[string]string{
+		"Error":    errMsg,
+		"Time":     when,
+		"Instance": instance,
+		"AppName":  "Gresbase",
 	})
 }
 
-func (s *Service) renderTemplate(name string, data any) (string, error) {
-	var buf bytes.Buffer
-	if err := s.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
-		return "", err
+// sendTemplated renders the subject and body for a template id (override or
+// built-in default, see renderEmail) and dispatches the email.
+func (s *Service) sendTemplated(id, to string, data any) error {
+	subject, body, err := s.renderEmail(id, data)
+	if err != nil {
+		return err
 	}
-	return buf.String(), nil
+	return s.Send(&Message{
+		To:      []mail.Address{{Address: to}},
+		Subject: subject,
+		HTML:    body,
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +194,7 @@ type SMTPSender struct {
 }
 
 func (s *SMTPSender) Send(msg *Message) error {
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	addr := net.JoinHostPort(s.host, strconv.Itoa(s.port))
 	from := msg.From.Address
 	to := make([]string, len(msg.To))
 	for i, a := range msg.To {
@@ -253,12 +230,12 @@ func (s *SMTPSender) Send(msg *Message) error {
 	if err != nil {
 		return fmt.Errorf("smtp client: %w", err)
 	}
-	defer client.Quit()
+	defer func() { _ = client.Quit() }() // best-effort SMTP session teardown
 
 	if s.username != "" {
 		auth := smtp.PlainAuth("", s.username, s.password, s.host)
 		if ok, _ := client.Extension("STARTTLS"); ok {
-			tlsCfg := &tls.Config{ServerName: s.host}
+			tlsCfg := &tls.Config{ServerName: s.host, MinVersion: tls.VersionTLS12}
 			if err := client.StartTLS(tlsCfg); err != nil {
 				return fmt.Errorf("starttls: %w", err)
 			}
@@ -312,109 +289,3 @@ func formatBytes(b int64) string {
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
-
-// ---------------------------------------------------------------------------
-// Email Templates
-// ---------------------------------------------------------------------------
-
-const mailTemplates = `
-{{define "otp"}}
-<!DOCTYPE html>
-<html>
-<body style="font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; padding: 40px;">
-  <div style="max-width: 400px; margin: 0 auto; background: #141414; border-radius: 12px; padding: 32px; border: 1px solid #222;">
-    <h1 style="font-size: 20px; margin: 0 0 8px;">{{.AppName}}</h1>
-    <p style="color: #888; margin: 0 0 24px;">Use this code to verify your identity</p>
-    <div style="background: #1a1a1a; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 24px;">
-      <span style="font-size: 32px; font-family: 'JetBrains Mono', monospace; letter-spacing: 8px; font-weight: 700;">{{.Code}}</span>
-    </div>
-    <p style="color: #666; font-size: 12px;">This code expires in 5 minutes.</p>
-  </div>
-</body>
-</html>
-{{end}}
-
-{{define "password_reset"}}
-<!DOCTYPE html>
-<html>
-<body style="font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; padding: 40px;">
-  <div style="max-width: 400px; margin: 0 auto; background: #141414; border-radius: 12px; padding: 32px; border: 1px solid #222;">
-    <h1 style="font-size: 20px; margin: 0 0 8px;">Reset your password</h1>
-    <p style="color: #888; margin: 0 0 24px;">Click the button below to reset your password for {{.AppName}}.</p>
-    <a href="{{.Link}}" style="display: block; background: #fafafa; color: #0a0a0a; text-decoration: none; text-align: center; padding: 12px; border-radius: 8px; font-weight: 600; font-size: 14px;">Reset Password</a>
-    <p style="color: #666; font-size: 12px; margin-top: 24px;">This link expires in 1 hour. If you did not request this, you can safely ignore this email.</p>
-  </div>
-</body>
-</html>
-{{end}}
-
-{{define "verification"}}
-<!DOCTYPE html>
-<html>
-<body style="font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; padding: 40px;">
-  <div style="max-width: 400px; margin: 0 auto; background: #141414; border-radius: 12px; padding: 32px; border: 1px solid #222;">
-    <h1 style="font-size: 20px; margin: 0 0 8px;">Verify your email</h1>
-    <p style="color: #888; margin: 0 0 24px;">Click below to verify your email address for {{.AppName}}.</p>
-    <a href="{{.Link}}" style="display: block; background: #fafafa; color: #0a0a0a; text-decoration: none; text-align: center; padding: 12px; border-radius: 8px; font-weight: 600; font-size: 14px;">Verify Email</a>
-  </div>
-</body>
-</html>
-{{end}}
-
-{{define "magic_link"}}
-<!DOCTYPE html>
-<html>
-<body style="font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; padding: 40px;">
-  <div style="max-width: 400px; margin: 0 auto; background: #141414; border-radius: 12px; padding: 32px; border: 1px solid #222;">
-    <h1 style="font-size: 20px; margin: 0 0 8px;">Sign in to {{.AppName}}</h1>
-    <p style="color: #888; margin: 0 0 24px;">Click the button below to securely sign in.</p>
-    <a href="{{.Link}}" style="display: block; background: #fafafa; color: #0a0a0a; text-decoration: none; text-align: center; padding: 12px; border-radius: 8px; font-weight: 600; font-size: 14px;">Sign in</a>
-    <p style="color: #666; font-size: 12px; margin-top: 24px;">This link expires in 15 minutes.</p>
-  </div>
-</body>
-</html>
-{{end}}
-
-{{define "email_change"}}
-<!DOCTYPE html>
-<html>
-<body style="font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; padding: 40px;">
-  <div style="max-width: 400px; margin: 0 auto; background: #141414; border-radius: 12px; padding: 32px; border: 1px solid #222;">
-    <h1 style="font-size: 20px; margin: 0 0 8px;">Confirm email change</h1>
-    <p style="color: #888; margin: 0 0 24px;">Click below to confirm your new email address.</p>
-    <a href="{{.Link}}" style="display: block; background: #fafafa; color: #0a0a0a; text-decoration: none; text-align: center; padding: 12px; border-radius: 8px; font-weight: 600; font-size: 14px;">Confirm Change</a>
-  </div>
-</body>
-</html>
-{{end}}
-
-{{define "auth_alert"}}
-<!DOCTYPE html>
-<html>
-<body style="font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; padding: 40px;">
-  <div style="max-width: 400px; margin: 0 auto; background: #141414; border-radius: 12px; padding: 32px; border: 1px solid #222;">
-    <h1 style="font-size: 20px; margin: 0 0 8px;">New sign-in</h1>
-    <p style="color: #888; margin: 0 0 24px;">A new sign-in to your {{.AppName}} account was detected.</p>
-    <div style="background: #1a1a1a; border-radius: 8px; padding: 16px; font-size: 13px; color: #aaa; line-height: 1.8;">
-      <p style="margin: 0;">IP: {{.IP}}</p>
-      <p style="margin: 0;">Browser: {{.UserAgent}}</p>
-      <p style="margin: 0;">Time: {{.Time}}</p>
-    </div>
-    <p style="color: #666; font-size: 12px; margin-top: 24px;">If this was not you, please change your password immediately.</p>
-  </div>
-</body>
-</html>
-{{end}}
-
-{{define "backup"}}
-<!DOCTYPE html>
-<html>
-<body style="font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; padding: 40px;">
-  <div style="max-width: 400px; margin: 0 auto; background: #141414; border-radius: 12px; padding: 32px; border: 1px solid #222;">
-    <h1 style="font-size: 20px; margin: 0 0 8px;">Backup completed</h1>
-    <p style="color: #888; margin: 0 0 24px;">Backup "{{.Name}}" ({{.Size}}) has been created successfully.</p>
-  </div>
-</body>
-</html>
-{{end}}
-`

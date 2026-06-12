@@ -111,10 +111,10 @@ func TestRecord_GetInt(t *testing.T) {
 
 func TestRecord_GetFloat(t *testing.T) {
 	r := New(map[string]any{
-		"f":     float64(3.14),
-		"i":     42,
-		"i64":   int64(100),
-		"jn":    json.Number("2.718"),
+		"f":   float64(3.14),
+		"i":   42,
+		"i64": int64(100),
+		"jn":  json.Number("2.718"),
 	})
 
 	if r.GetFloat("f") != 3.14 {
@@ -133,12 +133,12 @@ func TestRecord_GetFloat(t *testing.T) {
 
 func TestRecord_GetBool(t *testing.T) {
 	r := New(map[string]any{
-		"b":      true,
-		"str_t":  "true",
-		"str_1":  "1",
-		"num_1":  float64(1),
-		"num_0":  float64(0),
-		"str_f":  "false",
+		"b":     true,
+		"str_t": "true",
+		"str_1": "1",
+		"num_1": float64(1),
+		"num_0": float64(0),
+		"str_f": "false",
 	})
 
 	if !r.GetBool("b") {
@@ -197,8 +197,8 @@ func TestRecord_GetTime(t *testing.T) {
 
 func TestRecord_GetSlice(t *testing.T) {
 	r := New(map[string]any{
-		"arr":      []any{"a", "b", "c"},
-		"str_arr":  []string{"x", "y"},
+		"arr":     []any{"a", "b", "c"},
+		"str_arr": []string{"x", "y"},
 	})
 
 	sl := r.GetSlice("arr")
@@ -431,8 +431,8 @@ func TestRecordList_Len(t *testing.T) {
 
 func TestNormalizeRecordForDB(t *testing.T) {
 	schema := map[string]string{
-		"title": "text",
-		"views": "number",
+		"title":     "text",
+		"views":     "number",
 		"published": "bool",
 		"tags":      "json",
 	}

@@ -1,6 +1,6 @@
-// Package api provides the rule evaluation engine that properly compiles
-// collection access rules into SQL WHERE clauses using the filter engine.
-// This replaces the previous placeholder that only checked for admin presence.
+// Package api provides the rule evaluation engine used for collection access
+// rules. It resolves request macros for list/view filters and evaluates
+// per-record mutation rules against request + record context.
 package api
 
 import (
@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gresbase/gresbase/internal/api/middleware"
 	"github.com/gresbase/gresbase/internal/filter"
 )
 
@@ -23,8 +22,8 @@ type RuleContext struct {
 	CollectionID string
 	Role         string
 	Email        string
-	TenantID     string
 	Verified     bool
+	Anonymous    bool
 
 	// From request
 	Method string
@@ -34,41 +33,29 @@ type RuleContext struct {
 
 // NewRuleContext extracts rule evaluation context from an HTTP request.
 func NewRuleContext(r *http.Request) *RuleContext {
-	rc := &RuleContext{
-		Method: r.Method,
+	return NewRuleContextFromInfo(NewRequestInfo(r))
+}
+
+// NewRuleContextFromInfo converts normalized request info into a rule context.
+func NewRuleContextFromInfo(info *RequestInfo) *RuleContext {
+	if info == nil {
+		return &RuleContext{Query: map[string]string{}, Body: map[string]any{}}
 	}
 
-	// Extract auth info from context
-	if adminID, ok := r.Context().Value(middleware.CtxAdminID).(string); ok && adminID != "" {
-		rc.IsAdmin = true
-		rc.AdminID = adminID
+	return &RuleContext{
+		IsAdmin:      info.IsAdmin,
+		IsRecordAuth: info.IsRecordAuth,
+		AdminID:      info.AdminID,
+		RecordID:     info.RecordID,
+		CollectionID: info.CollectionID,
+		Role:         info.Role,
+		Email:        info.Email,
+		Verified:     info.Verified,
+		Anonymous:    info.Anonymous,
+		Method:       info.Method,
+		Query:        cloneStringMap(info.Query),
+		Body:         cloneAnyMap(info.Body),
 	}
-	if role, ok := r.Context().Value(middleware.CtxAdminRole).(string); ok {
-		rc.Role = role
-	}
-	if tenantID, ok := r.Context().Value(middleware.CtxTenantID).(string); ok {
-		rc.TenantID = tenantID
-	}
-	if email, ok := r.Context().Value("email").(string); ok {
-		rc.Email = email
-	}
-
-	// Record auth context
-	if recordID, ok := r.Context().Value("record_id").(string); ok {
-		rc.IsRecordAuth = true
-		rc.RecordID = recordID
-	}
-	if verified, ok := r.Context().Value("verified").(bool); ok {
-		rc.Verified = verified
-	}
-
-	// Parse query parameters
-	rc.Query = make(map[string]string)
-	for key := range r.URL.Query() {
-		rc.Query[key] = r.URL.Query().Get(key)
-	}
-
-	return rc
 }
 
 // RuleEvaluator evaluates collection access rules using the filter engine.
@@ -79,137 +66,156 @@ func NewRuleEvaluator() *RuleEvaluator {
 	return &RuleEvaluator{}
 }
 
-// EvaluateRule checks whether a request should be allowed based on the
-// collection's access rule. Unlike the previous placeholder, this actually
-// parses the rule expression and resolves @request.* macros.
-//
-// For "list" and "view" rules, this returns a SQL WHERE clause that should
-// be AND-ed with the query.
-//
-// For "create", "update", and "delete" rules, this returns a simple boolean.
-func (ev *RuleEvaluator) EvaluateRule(ctx context.Context, rule string, rc *RuleContext) (allowed bool, whereClause string) {
+// EvaluateRule validates and resolves a list/view rule into a filter expression
+// that can later be compiled by the query builder. It intentionally returns the
+// resolved filter expression instead of raw SQL so the rest of the stack uses a
+// single compilation path.
+func (ev *RuleEvaluator) EvaluateRule(ctx context.Context, rule string, rc *RuleContext) (allowed bool, resolvedFilter string) {
 	if strings.TrimSpace(rule) == "" {
 		return true, ""
 	}
 
-	// Superusers/admins bypass all rules
-	if rc.IsAdmin {
+	if rc != nil && rc.IsAdmin {
 		return true, ""
 	}
 
-	// Resolve @request.* macros in the rule string
 	resolved := ev.resolveMacros(rule, rc)
-
-	// Parse the resolved rule into a filter expression
-	expr, err := filter.ParseFilter(resolved)
-	if err != nil {
-		// If we can't parse the rule, deny access (safe default)
+	if _, err := filter.ParseFilter(resolved); err != nil {
 		return false, ""
 	}
 
-	// For list/view rules, convert to SQL WHERE clause and allow
-	// (the WHERE clause is applied to the query, filtering rows the user can see)
-	sql, _, err := filter.FilterToSQL(expr, nil)
-	if err != nil {
-		return false, ""
+	return true, resolved
+}
+
+// EvaluateRuleBool evaluates a rule against the provided record/body context.
+// This is used for create/update/delete/view checks where a per-record decision
+// is required.
+func (ev *RuleEvaluator) EvaluateRuleBool(ctx context.Context, rule string, rc *RuleContext, record map[string]any) bool {
+	if strings.TrimSpace(rule) == "" {
+		return true
 	}
 
-	return true, sql
+	if rc != nil && rc.IsAdmin {
+		return true
+	}
+
+	expr, err := filter.ParseFilter(rule)
+	if err != nil {
+		return false
+	}
+
+	matched, err := filter.FilterMatchesWithResolver(expr, record, func(key string) (any, error) {
+		return ev.resolveRequestValue(key, rc), nil
+	})
+	if err != nil {
+		return false
+	}
+
+	return matched
 }
 
-// EvaluateRuleBool evaluates a rule and returns a simple true/false.
-// Used for create/update/delete rules where we can't filter rows.
-func (ev *RuleEvaluator) EvaluateRuleBool(ctx context.Context, rule string, rc *RuleContext) bool {
-	allowed, _ := ev.EvaluateRule(ctx, rule, rc)
-	return allowed
-}
-
-// EvaluateRuleWhere evaluates a list/view rule and returns a SQL WHERE clause.
+// EvaluateRuleWhere resolves a list/view rule into a filter expression ready to
+// be passed to the query builder.
 func (ev *RuleEvaluator) EvaluateRuleWhere(ctx context.Context, rule string, rc *RuleContext) string {
-	_, where := ev.EvaluateRule(ctx, rule, rc)
-	return where
+	_, resolved := ev.EvaluateRule(ctx, rule, rc)
+	return resolved
 }
 
-// resolveMacros replaces @request.* macros with actual values from the context.
-//
-// Supported macros:
-//
-//	@request.auth.id          → authenticated record ID
-//	@request.auth.email       → authenticated email
-//	@request.auth.role        → authenticated role
-//	@request.auth.verified    → whether email is verified
-//	@request.auth.collection  → auth collection ID
-//	@request.method           → HTTP method
-//	@request.query.xxx        → query parameter value
-//
-// After resolution, these become literal values suitable for filter expressions.
-// Example: '@request.auth.id = owner' → '"rec_abc123" = owner'
+// resolveRequestValue resolves a supported @request.* macro to a concrete value.
+func (ev *RuleEvaluator) resolveRequestValue(key string, rc *RuleContext) any {
+	if rc == nil {
+		return nil
+	}
+
+	switch key {
+	case "@request.auth.id":
+		if rc.IsRecordAuth && rc.RecordID != "" {
+			return rc.RecordID
+		}
+		if rc.IsAdmin && rc.AdminID != "" {
+			return rc.AdminID
+		}
+		return ""
+	case "@request.auth.email":
+		return rc.Email
+	case "@request.auth.role":
+		return rc.Role
+	case "@request.auth.verified":
+		return rc.Verified
+	case "@request.auth.anonymous":
+		return rc.Anonymous
+	case "@request.auth.collection":
+		return rc.CollectionID
+	case "@request.method":
+		return rc.Method
+	}
+
+	if strings.HasPrefix(key, "@request.query.") {
+		return rc.Query[strings.TrimPrefix(key, "@request.query.")]
+	}
+	if strings.HasPrefix(key, "@request.body.") {
+		return rc.Body[strings.TrimPrefix(key, "@request.body.")]
+	}
+
+	return nil
+}
+
+// resolveMacros replaces supported @request.* macros with literal filter values.
+// This is used only for list/view rule compilation where the resolved result is
+// re-parsed by the query builder.
 func (ev *RuleEvaluator) resolveMacros(rule string, rc *RuleContext) string {
 	resolved := rule
-
-	// @request.auth.id
-	if strings.Contains(resolved, "@request.auth.id") {
-		if rc.IsRecordAuth && rc.RecordID != "" {
-			resolved = strings.ReplaceAll(resolved, "@request.auth.id", fmt.Sprintf("%q", rc.RecordID))
-		} else {
-			// Not authenticated as a record — replace with empty string
-			resolved = strings.ReplaceAll(resolved, "@request.auth.id", `""`)
+	for _, macro := range []string{
+		"@request.auth.id",
+		"@request.auth.email",
+		"@request.auth.role",
+		"@request.auth.verified",
+		"@request.auth.anonymous",
+		"@request.auth.collection",
+		"@request.method",
+	} {
+		if !strings.Contains(resolved, macro) {
+			continue
 		}
+		resolved = strings.ReplaceAll(resolved, macro, literalForFilter(ev.resolveRequestValue(macro, rc)))
 	}
 
-	// @request.auth.email
-	if strings.Contains(resolved, "@request.auth.email") {
-		resolved = strings.ReplaceAll(resolved, "@request.auth.email", fmt.Sprintf("%q", rc.Email))
-	}
-
-	// @request.auth.role
-	if strings.Contains(resolved, "@request.auth.role") {
-		resolved = strings.ReplaceAll(resolved, "@request.auth.role", fmt.Sprintf("%q", rc.Role))
-	}
-
-	// @request.auth.verified
-	if strings.Contains(resolved, "@request.auth.verified") {
-		if rc.Verified {
-			resolved = strings.ReplaceAll(resolved, "@request.auth.verified", "true")
-		} else {
-			resolved = strings.ReplaceAll(resolved, "@request.auth.verified", "false")
-		}
-	}
-
-	// @request.auth.collection
-	if strings.Contains(resolved, "@request.auth.collection") {
-		resolved = strings.ReplaceAll(resolved, "@request.auth.collection", fmt.Sprintf("%q", rc.CollectionID))
-	}
-
-	// @request.method
-	if strings.Contains(resolved, "@request.method") {
-		resolved = strings.ReplaceAll(resolved, "@request.method", fmt.Sprintf("%q", rc.Method))
-	}
-
-	// @request.query.xxx
-	for {
-		start := strings.Index(resolved, "@request.query.")
-		if start == -1 {
-			break
-		}
-		end := start + len("@request.query.")
-		// Find the end of the macro name (alphanumeric + underscore + dot)
-		fieldEnd := end
-		for fieldEnd < len(resolved) {
-			c := resolved[fieldEnd]
-			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
-				fieldEnd++
-			} else {
+	for _, prefix := range []string{"@request.query.", "@request.body."} {
+		for {
+			start := strings.Index(resolved, prefix)
+			if start == -1 {
 				break
 			}
+			end := start + len(prefix)
+			fieldEnd := end
+			for fieldEnd < len(resolved) {
+				c := resolved[fieldEnd]
+				if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
+					fieldEnd++
+				} else {
+					break
+				}
+			}
+			macro := resolved[start:fieldEnd]
+			resolved = resolved[:start] + literalForFilter(ev.resolveRequestValue(macro, rc)) + resolved[fieldEnd:]
 		}
-		fieldName := resolved[end:fieldEnd]
-		val, ok := rc.Query[fieldName]
-		if !ok {
-			val = ""
-		}
-		resolved = resolved[:start] + fmt.Sprintf("%q", val) + resolved[fieldEnd:]
 	}
 
 	return resolved
+}
+
+func literalForFilter(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return "null"
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case string:
+		return fmt.Sprintf("%q", v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }

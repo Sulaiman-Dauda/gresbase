@@ -187,6 +187,52 @@ func TestRateLimitByIPMiddleware(t *testing.T) {
 	}
 }
 
+func TestTimeoutExceptSkipsLongLivedRequests(t *testing.T) {
+	mw := TimeoutExcept(10*time.Millisecond, IsLongLivedRequest)
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, hasDeadline := r.Context().Deadline()
+		writeCode := http.StatusNoContent
+		if hasDeadline {
+			writeCode = http.StatusAccepted
+		}
+		w.WriteHeader(writeCode)
+	}))
+
+	sseReq := httptest.NewRequest(http.MethodGet, "/api/v1/sse", nil)
+	sseRec := httptest.NewRecorder()
+	h.ServeHTTP(sseRec, sseReq)
+	if sseRec.Code != http.StatusNoContent {
+		t.Fatalf("expected long-lived SSE route to skip timeout deadline, got %d", sseRec.Code)
+	}
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	healthRec := httptest.NewRecorder()
+	h.ServeHTTP(healthRec, healthReq)
+	if healthRec.Code != http.StatusAccepted {
+		t.Fatalf("expected regular route to carry timeout deadline, got %d", healthRec.Code)
+	}
+}
+
+func TestIsLongLivedRequest(t *testing.T) {
+	tests := []struct {
+		method string
+		path   string
+		want   bool
+	}{
+		{http.MethodGet, "/api/v1/realtime", true},
+		{http.MethodGet, "/api/v1/sse", true},
+		{http.MethodPost, "/api/v1/realtime", false},
+		{http.MethodGet, "/api/v1/health", false},
+	}
+
+	for _, tt := range tests {
+		req := httptest.NewRequest(tt.method, tt.path, nil)
+		if got := IsLongLivedRequest(req); got != tt.want {
+			t.Fatalf("IsLongLivedRequest(%s %s) = %v, want %v", tt.method, tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestAuthRateLimiter(t *testing.T) {
 	rl := NewAuthRateLimiter()
 
@@ -294,5 +340,74 @@ func TestSecurityHeaders(t *testing.T) {
 		if rec.Header().Get(h) == "" {
 			t.Errorf("expected %s header to be set", h)
 		}
+	}
+}
+
+func TestCSRFMiddleware(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := CSRF(ok)
+
+	newReq := func(method string, cookies map[string]string, header string) *http.Request {
+		r := httptest.NewRequest(method, "/api/v1/collections/abc", nil)
+		for k, v := range cookies {
+			r.AddCookie(&http.Cookie{Name: k, Value: v})
+		}
+		if header != "" {
+			r.Header.Set(CSRFHeaderName, header)
+		}
+		return r
+	}
+
+	// Safe method: always allowed.
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, newReq(http.MethodGet, map[string]string{AccessCookieName: "tok", CSRFCookieName: "csrf"}, ""))
+	if rr.Code != http.StatusOK {
+		t.Errorf("GET should pass: got %d", rr.Code)
+	}
+
+	// Cookie-auth POST without CSRF header: rejected.
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, newReq(http.MethodPost, map[string]string{AccessCookieName: "tok", CSRFCookieName: "csrf"}, ""))
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("POST without CSRF header should be 403: got %d", rr.Code)
+	}
+
+	// Cookie-auth POST with matching CSRF header: allowed.
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, newReq(http.MethodPost, map[string]string{AccessCookieName: "tok", CSRFCookieName: "csrf"}, "csrf"))
+	if rr.Code != http.StatusOK {
+		t.Errorf("POST with matching CSRF should pass: got %d", rr.Code)
+	}
+
+	// Cookie-auth POST with mismatched CSRF header: rejected.
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, newReq(http.MethodPost, map[string]string{AccessCookieName: "tok", CSRFCookieName: "csrf"}, "wrong"))
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("POST with mismatched CSRF should be 403: got %d", rr.Code)
+	}
+
+	// Authorization-header POST: exempt even without CSRF.
+	rr = httptest.NewRecorder()
+	req := newReq(http.MethodPost, nil, "")
+	req.Header.Set("Authorization", "Bearer xyz")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("Authorization-header POST should be exempt: got %d", rr.Code)
+	}
+
+	// No auth cookie at all: nothing to protect, passes through.
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, newReq(http.MethodPost, nil, ""))
+	if rr.Code != http.StatusOK {
+		t.Errorf("POST without auth cookie should pass through: got %d", rr.Code)
+	}
+
+	// Exempt path (login) with cookie present: passes.
+	rr = httptest.NewRecorder()
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	loginReq.AddCookie(&http.Cookie{Name: AccessCookieName, Value: "tok"})
+	h.ServeHTTP(rr, loginReq)
+	if rr.Code != http.StatusOK {
+		t.Errorf("exempt login path should pass: got %d", rr.Code)
 	}
 }

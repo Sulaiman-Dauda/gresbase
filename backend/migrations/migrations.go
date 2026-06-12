@@ -14,5 +14,8 @@ func All() []*database.Migration {
 		Migration002,
 		Migration003,
 		Migration004,
+		Migration005,
+		Migration006,
+		Migration007,
 	}
 }

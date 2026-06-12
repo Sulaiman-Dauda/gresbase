@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/gresbase/gresbase/internal/events"
@@ -45,8 +46,9 @@ func TestRegisterPlugin(t *testing.T) {
 func TestUnregisterPlugin(t *testing.T) {
 	reg := NewRegistry()
 
-	reg.Register(&Plugin{ID: "p1", Name: "One", Enabled: true})
-	reg.Register(&Plugin{ID: "p2", Name: "Two", Enabled: true})
+	p1 := &Plugin{ID: "p1", Name: "One", Enabled: true, Hooks: map[string]events.Handler{}}
+	reg.Register(p1)
+	reg.Register(&Plugin{ID: "p2", Name: "Two", Enabled: true, Hooks: map[string]events.Handler{}})
 
 	if len(reg.List()) != 2 {
 		t.Errorf("expected 2 plugins, got %d", len(reg.List()))
@@ -58,6 +60,9 @@ func TestUnregisterPlugin(t *testing.T) {
 	}
 	if reg.Get("p1") != nil {
 		t.Error("p1 should be nil after unregister")
+	}
+	if p1.Enabled {
+		t.Error("unregistered plugin should be disabled to deactivate bound handlers")
 	}
 }
 
@@ -127,5 +132,44 @@ func TestLoadBuiltinPlugins(t *testing.T) {
 		if p.Name == "" {
 			t.Error("plugin should have a Name")
 		}
+	}
+}
+
+func TestPluginBuilderAddsHooksRoutesAndMiddleware(t *testing.T) {
+	p := New("test.plugin", "Test Plugin", "1.0.0").
+		HookFunc("onServe", "serve-hook", events.PriorityDefault, func(e events.Event) error { return nil }).
+		Use(func(next http.Handler) http.Handler { return next }).
+		MethodFunc(http.MethodGet, "/ping", func(w http.ResponseWriter, r *http.Request) {})
+
+	if len(p.Hooks) != 1 {
+		t.Fatalf("expected 1 hook, got %d", len(p.Hooks))
+	}
+	if len(p.Middlewares) != 1 {
+		t.Fatalf("expected 1 middleware, got %d", len(p.Middlewares))
+	}
+	if len(p.Routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(p.Routes))
+	}
+	if p.Routes[0].Method != http.MethodGet || p.Routes[0].Pattern != "/ping" {
+		t.Fatalf("unexpected route config: %+v", p.Routes[0])
+	}
+}
+
+func TestRegistryEnableDisable(t *testing.T) {
+	reg := NewRegistry()
+	if err := reg.Register(&Plugin{ID: "p1", Name: "Plugin 1", Enabled: true, Hooks: map[string]events.Handler{}}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := reg.Disable("p1"); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if reg.Get("p1").Enabled {
+		t.Fatal("expected plugin to be disabled")
+	}
+	if err := reg.Enable("p1"); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if !reg.Get("p1").Enabled {
+		t.Fatal("expected plugin to be enabled")
 	}
 }

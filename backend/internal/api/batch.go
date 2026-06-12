@@ -8,10 +8,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	urlpkg "net/url"
 	"strings"
 	"sync"
 
 	"github.com/gresbase/gresbase/internal/app"
+	"github.com/gresbase/gresbase/internal/events"
+	"github.com/gresbase/gresbase/internal/forms"
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
 )
@@ -41,32 +44,47 @@ type BatchPayload struct {
 // HandleBatch processes a batch of requests sequentially within a transaction.
 // POST /api/v1/batch
 func (h *Handlers) HandleBatch(w http.ResponseWriter, r *http.Request) {
-	var payload BatchPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	var form forms.BatchPayloadForm
+	if err := decodeJSONBody(r, &form); err != nil {
 		writeError(w, 400, "Invalid batch payload")
 		return
 	}
-
-	if len(payload.Requests) == 0 {
-		writeError(w, 400, "Batch must contain at least one request")
+	if err := form.Validate(); err != nil {
+		writeValidationError(w, err)
 		return
 	}
 
-	if len(payload.Requests) > 100 {
-		writeError(w, 400, "Batch limit is 100 requests")
-		return
+	payload := BatchPayload{Requests: make([]BatchRequest, len(form.Requests))}
+	for i, req := range form.Requests {
+		payload.Requests[i] = BatchRequest{
+			Method:  req.Method,
+			URL:     req.URL,
+			Headers: req.Headers,
+			Body:    req.Body,
+		}
 	}
 
-	// Execute in a database transaction if requested
 	useTransaction := r.URL.Query().Get("transactional") == "true"
+	appCtx := h.app
+	event := &events.BatchRequestEvent{
+		App:           h.app,
+		Request:       r,
+		Info:          toEventRequestInfoWithBody(r, form),
+		RequestsCount: len(payload.Requests),
+		Transactional: useTransaction,
+	}
 
 	var responses []BatchResponse
-	appCtx := h.app
-
-	if useTransaction {
-		responses = executeBatchTransactional(appCtx, r, payload.Requests)
-	} else {
-		responses = executeBatch(appCtx, r, payload.Requests)
+	if err := h.app.OnBatchRequest().Trigger(event, func(e events.Event) error {
+		if event.Transactional {
+			responses = executeBatchTransactional(appCtx, r, payload.Requests)
+		} else {
+			responses = executeBatch(appCtx, r, payload.Requests)
+		}
+		return event.Next()
+	}); err != nil {
+		writeInternalError(w, "batch", err)
+		return
 	}
 
 	writeJSON(w, 200, BatchPayload{
@@ -90,9 +108,10 @@ func executeBatch(appCtx *app.App, originalReq *http.Request, requests []BatchRe
 func executeBatchTransactional(appCtx *app.App, originalReq *http.Request, requests []BatchRequest) []BatchResponse {
 	responses := make([]BatchResponse, len(requests))
 
-	err := appCtx.DB().RunInTransaction(context.Background(), func(tx pgx.Tx) error {
+	err := appCtx.DB().RunInTransactionContext(originalReq.Context(), func(txCtx context.Context, tx pgx.Tx) error {
+		txReq := originalReq.WithContext(txCtx)
 		for i, req := range requests {
-			resp := executeSingleRequest(appCtx, originalReq, req)
+			resp := executeSingleRequest(appCtx, txReq, req)
 			responses[i] = resp
 
 			// If any request fails, abort the entire batch
@@ -137,13 +156,24 @@ func executeSingleRequest(appCtx *app.App, originalReq *http.Request, req BatchR
 		}
 	}
 
-	var bodyReader io.Reader
-	if req.Body != nil {
-		bodyReader = bytes.NewReader(req.Body)
+	parsedURL, err := urlpkg.Parse(url)
+	if err != nil {
+		return BatchResponse{Status: 400, Error: err.Error()}
 	}
 
-	httpReq := httptest.NewRequest(req.Method, url, bodyReader)
-	httpReq = httpReq.WithContext(originalReq.Context())
+	ctx := cloneRequestContext(originalReq.Context(), true)
+	httpReq := originalReq.Clone(ctx)
+	httpReq.Method = req.Method
+	httpReq.URL = parsedURL
+	httpReq.RequestURI = url
+	httpReq.Host = originalReq.Host
+	if req.Body != nil {
+		httpReq.Body = io.NopCloser(bytes.NewReader(req.Body))
+		httpReq.ContentLength = int64(len(req.Body))
+	} else {
+		httpReq.Body = http.NoBody
+		httpReq.ContentLength = 0
+	}
 
 	// Copy auth headers from original request
 	if auth := originalReq.Header.Get("Authorization"); auth != "" {

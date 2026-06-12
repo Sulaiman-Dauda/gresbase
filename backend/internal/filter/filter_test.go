@@ -211,6 +211,33 @@ func TestFilterMatches(t *testing.T) {
 	}
 }
 
+func TestFilterMatchesWithResolver(t *testing.T) {
+	expr, err := ParseFilter(`owner = @request.auth.id && @request.auth.role = "member"`)
+	if err != nil {
+		t.Fatalf("ParseFilter error: %v", err)
+	}
+
+	record := map[string]any{"owner": "rec_123"}
+	resolver := func(key string) (any, error) {
+		switch key {
+		case "@request.auth.id":
+			return "rec_123", nil
+		case "@request.auth.role":
+			return "member", nil
+		default:
+			return nil, nil
+		}
+	}
+
+	matched, err := FilterMatchesWithResolver(expr, record, resolver)
+	if err != nil {
+		t.Fatalf("FilterMatchesWithResolver error: %v", err)
+	}
+	if !matched {
+		t.Fatal("expected rule with right-side resolver values to match")
+	}
+}
+
 func TestValidateFields(t *testing.T) {
 	expr, _ := ParseFilter(`status = "active" && age > 18`)
 
@@ -245,4 +272,39 @@ func TestBuildRuleSQL(t *testing.T) {
 		t.Errorf("Expected param 'active', got %v", params[0])
 	}
 	t.Logf("SQL: %s, Params: %v", sql, params)
+}
+
+func TestParseFilterRejectsOversizedExpression(t *testing.T) {
+	big := strings.Repeat("a=1 && ", 1000) + "a=1"
+	if _, err := ParseFilter(big); err == nil {
+		t.Fatal("expected error for oversized filter expression")
+	}
+}
+
+func TestParseFilterRejectsTooManyClauses(t *testing.T) {
+	// Many clauses but under the byte cap.
+	parts := make([]string, 0, maxClauses+5)
+	for i := 0; i < maxClauses+5; i++ {
+		parts = append(parts, "a=1")
+	}
+	expr := strings.Join(parts, " && ")
+	if len(expr) > maxExprBytes {
+		t.Fatalf("test expression unexpectedly exceeds byte cap (%d)", len(expr))
+	}
+	if _, err := ParseFilter(expr); err == nil {
+		t.Fatal("expected error for too many clauses")
+	}
+}
+
+func TestParseFilterRejectsDeepNesting(t *testing.T) {
+	expr := strings.Repeat("(", maxDepth+5) + "a=1" + strings.Repeat(")", maxDepth+5)
+	if _, err := ParseFilter(expr); err == nil {
+		t.Fatal("expected error for deeply nested filter expression")
+	}
+}
+
+func TestParseFilterAcceptsReasonableExpression(t *testing.T) {
+	if _, err := ParseFilter(`status = "active" && (age >= 18 || verified = true)`); err != nil {
+		t.Fatalf("reasonable expression should parse, got: %v", err)
+	}
 }

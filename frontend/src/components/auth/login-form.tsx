@@ -30,7 +30,7 @@ export function LoginForm() {
   }, [])
 
   useEffect(() => {
-    if (isAuthenticated) router.push('/overview')
+    if (isAuthenticated) router.push('/collections')
   }, [isAuthenticated, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -47,14 +47,15 @@ export function LoginForm() {
         const data = await res.json()
         if (!res.ok) throw new Error(data.message)
 
-        // Store token and redirect
+        // Store auth and redirect into the collections workbench
         localStorage.setItem('gresbase_token', data.token)
+        if (data.refreshToken) localStorage.setItem('gresbase_refresh', data.refreshToken)
         toast.success('Setup complete! Welcome to Gresbase.')
-        router.push('/overview')
+        router.push('/collections')
       } else {
         await login(email, password)
         toast.success('Signed in')
-        router.push('/overview')
+        router.push('/collections')
       }
     } catch (err: any) {
       toast.error(err.message || 'Invalid credentials')

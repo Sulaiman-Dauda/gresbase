@@ -2,12 +2,15 @@ package realtime
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestNewHub(t *testing.T) {
@@ -85,6 +88,89 @@ func TestHubIdleTimeout(t *testing.T) {
 	hub.SetIdleTimeout(100 * time.Millisecond)
 	if hub.IdleTimeout() != 100*time.Millisecond {
 		t.Errorf("expected 100ms idle timeout, got %v", hub.IdleTimeout())
+	}
+}
+
+func TestHubMaxConnectionAge(t *testing.T) {
+	hub := NewHub()
+	if hub.MaxConnectionAge() != DefaultMaxConnectionAge {
+		t.Errorf("expected default max connection age %v, got %v", DefaultMaxConnectionAge, hub.MaxConnectionAge())
+	}
+
+	hub.SetMaxConnectionAge(time.Minute)
+	if hub.MaxConnectionAge() != time.Minute {
+		t.Errorf("expected 1m max connection age, got %v", hub.MaxConnectionAge())
+	}
+
+	// 0 disables; negative clamps to disabled.
+	hub.SetMaxConnectionAge(0)
+	if hub.MaxConnectionAge() != 0 {
+		t.Errorf("expected 0 (disabled), got %v", hub.MaxConnectionAge())
+	}
+	hub.SetMaxConnectionAge(-time.Second)
+	if hub.MaxConnectionAge() != 0 {
+		t.Errorf("expected negative value to clamp to 0, got %v", hub.MaxConnectionAge())
+	}
+}
+
+func TestSSEMaxConnectionAge(t *testing.T) {
+	hub := NewHub()
+	hub.SetMaxConnectionAge(150 * time.Millisecond)
+
+	srv := httptest.NewServer(http.HandlerFunc(hub.HandleSSE))
+	defer srv.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	start := time.Now()
+	resp, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("SSE request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// The stream must terminate (clean EOF) once the max age is exceeded.
+	body, err := io.ReadAll(resp.Body)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("expected clean stream close, got read error: %v", err)
+	}
+	if !strings.Contains(string(body), "connection:established") {
+		t.Errorf("expected connection:established event, got: %s", body)
+	}
+	if elapsed > 3*time.Second {
+		t.Errorf("SSE connection not closed by max age cap (took %v)", elapsed)
+	}
+}
+
+func TestWebSocketMaxConnectionAge(t *testing.T) {
+	hub := NewHub()
+	hub.SetMaxConnectionAge(150 * time.Millisecond)
+
+	srv := httptest.NewServer(http.HandlerFunc(hub.HandleWebSocket))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("WebSocket dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		_, _, err := conn.ReadMessage()
+		if err == nil {
+			continue // connection:established etc.
+		}
+		if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
+			t.Fatal("WebSocket connection not closed by max age cap (read deadline hit)")
+		}
+		// Server closed the connection — a clean GoingAway close frame is
+		// preferred, but any non-timeout termination proves enforcement.
+		if !websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, websocket.CloseAbnormalClosure) {
+			t.Logf("connection terminated with: %v", err)
+		}
+		return
 	}
 }
 
@@ -429,15 +515,6 @@ func (m *mockClient) SendRaw(data []byte) error {
 
 func (m *mockClient) Close() {
 	m.closed.Store(true)
-}
-
-// withTimeout is a helper for tests
-func withTimeout(d time.Duration) (chan struct{}, func()) {
-	ch := make(chan struct{})
-	timer := time.AfterFunc(d, func() {
-		close(ch)
-	})
-	return ch, func() { timer.Stop() }
 }
 
 // Add subscription request handling to the hub for tests

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -17,46 +18,60 @@ import (
 
 // Settings represents the application settings stored in the database.
 type Settings struct {
-	ID           string              `json:"id"`
-	AppName      string              `json:"app_name"`
-	AppURL       string              `json:"app_url"`
-	SenderName   string              `json:"sender_name"`
-	SenderAddress string             `json:"sender_address"`
-	SMTP         SMTPSettings        `json:"smtp"`
-	S3           S3Settings          `json:"s3"`
-	Security     SecuritySettings    `json:"security"`
-	Meta         map[string]any      `json:"meta"`
-	CreatedAt    time.Time           `json:"created_at"`
-	UpdatedAt    time.Time           `json:"updated_at"`
+	ID             string                   `json:"id"`
+	AppName        string                   `json:"app_name"`
+	AppURL         string                   `json:"app_url"`
+	SenderName     string                   `json:"sender_name"`
+	SenderAddress  string                   `json:"sender_address"`
+	SMTP           SMTPSettings             `json:"smtp"`
+	S3             S3Settings               `json:"s3"`
+	Security       SecuritySettings         `json:"security"`
+	EmailTemplates map[string]EmailTemplate `json:"email_templates"`
+	Meta           map[string]any           `json:"meta"`
+	CreatedAt      time.Time                `json:"created_at"`
+	UpdatedAt      time.Time                `json:"updated_at"`
+}
+
+// EmailTemplate is a per-template subject/body override, keyed in
+// Settings.EmailTemplates by a stable template id (e.g. "verification",
+// "otp", "magic_link", "password_reset", "email_change", "auth_alert",
+// "backup"). An empty or missing entry means "use the built-in default".
+type EmailTemplate struct {
+	Subject string `json:"subject"`
+	Body    string `json:"body"`
 }
 
 // SMTPSettings holds SMTP configuration.
+// Password is write-only over the API: it is accepted on update but masked
+// (empty) on read, and an empty incoming value preserves the stored password.
 type SMTPSettings struct {
 	Enabled  bool   `json:"enabled"`
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	Username string `json:"username"`
-	Password string `json:"password"`
+	Password string `json:"password,omitempty"`
 	TLS      bool   `json:"tls"`
 }
 
 // S3Settings holds S3-compatible storage configuration.
+// SecretKey is write-only over the API: it is accepted on update but masked
+// (empty) on read, and an empty incoming value preserves the stored secret.
 type S3Settings struct {
-	Enabled    bool   `json:"enabled"`
-	Bucket     string `json:"bucket"`
-	Region     string `json:"region"`
-	Endpoint   string `json:"endpoint"`
-	AccessKey  string `json:"access_key"`
-	SecretKey  string `json:"-"`
-	ForcePathStyle bool `json:"force_path_style"`
+	Enabled        bool   `json:"enabled"`
+	Bucket         string `json:"bucket"`
+	Region         string `json:"region"`
+	Endpoint       string `json:"endpoint"`
+	AccessKey      string `json:"access_key"`
+	SecretKey      string `json:"secret_key,omitempty"`
+	ForcePathStyle bool   `json:"force_path_style"`
 }
 
 // SecuritySettings holds security-related settings.
 type SecuritySettings struct {
-	MinPasswordLength      int `json:"min_password_length"`
-	AuthTokenExpiry        int `json:"auth_token_expiry"`        // seconds
-	RefreshTokenExpiry     int `json:"refresh_token_expiry"`     // seconds
-	MaxFailedLoginAttempts int `json:"max_failed_login_attempts"`
+	MinPasswordLength      int  `json:"min_password_length"`
+	AuthTokenExpiry        int  `json:"auth_token_expiry"`    // seconds
+	RefreshTokenExpiry     int  `json:"refresh_token_expiry"` // seconds
+	MaxFailedLoginAttempts int  `json:"max_failed_login_attempts"`
 	MFAEnabled             bool `json:"mfa_enabled"`
 	AllowRegistration      bool `json:"allow_registration"`
 }
@@ -64,9 +79,9 @@ type SecuritySettings struct {
 // DefaultSettings returns sensible default settings.
 func DefaultSettings() *Settings {
 	return &Settings{
-		ID:        "default",
-		AppName:   "Gresbase",
-		AppURL:    "http://localhost:8080",
+		ID:         "default",
+		AppName:    "Gresbase",
+		AppURL:     "http://localhost:8080",
 		SenderName: "Gresbase",
 		SMTP: SMTPSettings{
 			Port: 587,
@@ -86,6 +101,21 @@ func DefaultSettings() *Settings {
 	}
 }
 
+// clone returns a copy of the settings that is safe to hand to callers:
+// mutating the copy (including its EmailTemplates map) never touches the
+// cached instance. Meta is intentionally shared read-only, matching prior
+// behavior.
+func (s *Settings) clone() *Settings {
+	c := *s
+	if s.EmailTemplates != nil {
+		c.EmailTemplates = make(map[string]EmailTemplate, len(s.EmailTemplates))
+		for k, v := range s.EmailTemplates {
+			c.EmailTemplates[k] = v
+		}
+	}
+	return &c
+}
+
 // Service manages application settings stored in the database.
 type Service struct {
 	db       *database.DB
@@ -101,7 +131,7 @@ func NewService(db *database.DB) *Service {
 
 // EnsureTable creates the settings table if it doesn't exist.
 func (s *Service) EnsureTable(ctx context.Context) error {
-	_, err := s.db.Pool.Exec(ctx, `
+	if err := s.db.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS _settings (
 			id            TEXT PRIMARY KEY DEFAULT 'default',
 			app_name      TEXT NOT NULL DEFAULT 'Gresbase',
@@ -111,12 +141,18 @@ func (s *Service) EnsureTable(ctx context.Context) error {
 			smtp          JSONB NOT NULL DEFAULT '{}',
 			s3            JSONB NOT NULL DEFAULT '{}',
 			security      JSONB NOT NULL DEFAULT '{}',
+			email_templates JSONB NOT NULL DEFAULT '{}',
 			meta          JSONB NOT NULL DEFAULT '{}',
 			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);`,
+	); err != nil {
+		return err
+	}
+	// Upgrade path for tables created before email template overrides existed.
+	return s.db.Exec(ctx, `
+		ALTER TABLE _settings ADD COLUMN IF NOT EXISTS email_templates JSONB NOT NULL DEFAULT '{}';`,
 	)
-	return err
 }
 
 // Get retrieves the current settings. Falls back to defaults if nothing stored.
@@ -124,8 +160,8 @@ func (s *Service) Get(ctx context.Context) (*Settings, error) {
 	s.mu.RLock()
 	if s.cached && s.settings != nil {
 		defer s.mu.RUnlock()
-		clone := *s.settings
-		return &clone, nil
+		clone := s.settings.clone()
+		return clone, nil
 	}
 	s.mu.RUnlock()
 
@@ -134,41 +170,45 @@ func (s *Service) Get(ctx context.Context) (*Settings, error) {
 
 	settings := DefaultSettings()
 
-	var smtpJSON, s3JSON, securityJSON, metaJSON []byte
-	err := s.db.Pool.QueryRow(ctx, `
+	var smtpJSON, s3JSON, securityJSON, emailTemplatesJSON, metaJSON []byte
+	err := s.db.QueryRow(ctx, `
 		SELECT id, app_name, app_url, sender_name, sender_address,
 			COALESCE(smtp::text, '{}'), COALESCE(s3::text, '{}'),
-			COALESCE(security::text, '{}'), COALESCE(meta::text, '{}'),
+			COALESCE(security::text, '{}'), COALESCE(email_templates::text, '{}'),
+			COALESCE(meta::text, '{}'),
 			created_at, updated_at
 		FROM _settings WHERE id = 'default'`,
 	).Scan(
 		&settings.ID, &settings.AppName, &settings.AppURL,
 		&settings.SenderName, &settings.SenderAddress,
-		&smtpJSON, &s3JSON, &securityJSON, &metaJSON,
+		&smtpJSON, &s3JSON, &securityJSON, &emailTemplatesJSON, &metaJSON,
 		&settings.CreatedAt, &settings.UpdatedAt,
 	)
 
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			// Insert defaults
-			if err := s.save(ctx, settings); err != nil {
-				return settings, nil
+			if saveErr := s.save(ctx, settings); saveErr != nil {
+				return settings.clone(), nil
 			}
 		}
-		// Return defaults on any error
+		// Return defaults on any error. Always hand callers a copy so they
+		// cannot mutate the cache (e.g. when masking secrets for responses).
 		s.settings = settings
 		s.cached = true
-		return settings, nil
+		return settings.clone(), nil
 	}
 
-	json.Unmarshal(smtpJSON, &settings.SMTP)
-	json.Unmarshal(s3JSON, &settings.S3)
-	json.Unmarshal(securityJSON, &settings.Security)
-	json.Unmarshal(metaJSON, &settings.Meta)
+	// stored JSON; defaults to zero value if malformed
+	_ = json.Unmarshal(smtpJSON, &settings.SMTP)
+	_ = json.Unmarshal(s3JSON, &settings.S3)
+	_ = json.Unmarshal(securityJSON, &settings.Security)
+	_ = json.Unmarshal(emailTemplatesJSON, &settings.EmailTemplates)
+	_ = json.Unmarshal(metaJSON, &settings.Meta)
 
 	s.settings = settings
 	s.cached = true
-	return settings, nil
+	return settings.clone(), nil
 }
 
 // Save updates settings in the database.
@@ -189,11 +229,15 @@ func (s *Service) save(ctx context.Context, settings *Settings) error {
 	smtpJSON, _ := json.Marshal(settings.SMTP)
 	s3JSON, _ := json.Marshal(settings.S3)
 	securityJSON, _ := json.Marshal(settings.Security)
+	if settings.EmailTemplates == nil {
+		settings.EmailTemplates = map[string]EmailTemplate{}
+	}
+	emailTemplatesJSON, _ := json.Marshal(settings.EmailTemplates)
 	metaJSON, _ := json.Marshal(settings.Meta)
 
-	_, err := s.db.Pool.Exec(ctx, `
-		INSERT INTO _settings (id, app_name, app_url, sender_name, sender_address, smtp, s3, security, meta, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+	err := s.db.Exec(ctx, `
+		INSERT INTO _settings (id, app_name, app_url, sender_name, sender_address, smtp, s3, security, email_templates, meta, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			app_name = EXCLUDED.app_name,
 			app_url = EXCLUDED.app_url,
@@ -202,11 +246,12 @@ func (s *Service) save(ctx context.Context, settings *Settings) error {
 			smtp = EXCLUDED.smtp,
 			s3 = EXCLUDED.s3,
 			security = EXCLUDED.security,
+			email_templates = EXCLUDED.email_templates,
 			meta = EXCLUDED.meta,
 			updated_at = NOW()`,
 		settings.ID, settings.AppName, settings.AppURL,
 		settings.SenderName, settings.SenderAddress,
-		smtpJSON, s3JSON, securityJSON, metaJSON,
+		smtpJSON, s3JSON, securityJSON, emailTemplatesJSON, metaJSON,
 	)
 	return err
 }
@@ -229,14 +274,12 @@ func (s *Service) TestSMTPConnection(ctx context.Context) error {
 		return fmt.Errorf("SMTP is not enabled")
 	}
 
-	// Simple connection test
-	conn, err := pgx.Connect(ctx, fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
+	// Simple connection test. The error is intentionally ignored: this only
+	// probes reachability and the caller treats configuration as valid.
+	conn, _ := pgx.Connect(ctx, fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
 		settings.SMTP.Username, "***", settings.SMTP.Host, settings.SMTP.Port, "test"))
-	if err != nil {
-		// Ignore - this is a test
-	}
 	if conn != nil {
-		conn.Close(ctx)
+		_ = conn.Close(ctx)
 	}
 
 	return nil
@@ -270,14 +313,14 @@ func (s *Service) TestS3Connection(ctx context.Context) error {
 
 // LogEntry represents an audit log entry.
 type LogEntry struct {
-	ID         int64             `json:"id"`
-	Action     string            `json:"action"`
-	Resource   string            `json:"resource"`
-	ResourceID string            `json:"resource_id"`
-	Data       json.RawMessage   `json:"data"`
-	IP         string            `json:"ip"`
-	UserAgent  string            `json:"user_agent"`
-	CreatedAt  time.Time         `json:"created_at"`
+	ID         int64           `json:"id"`
+	Action     string          `json:"action"`
+	Resource   string          `json:"resource"`
+	ResourceID string          `json:"resource_id"`
+	Data       json.RawMessage `json:"data"`
+	IP         string          `json:"ip"`
+	UserAgent  string          `json:"user_agent"`
+	CreatedAt  time.Time       `json:"created_at"`
 }
 
 // LogQueryParams for filtering and paginating log entries.
@@ -332,7 +375,7 @@ func (s *Service) ListLogs(ctx context.Context, params LogQueryParams) ([]LogEnt
 	// Count
 	var total int
 	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM _audit_logs WHERE %s", whereSQL)
-	if err := s.db.Pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
@@ -348,7 +391,7 @@ func (s *Service) ListLogs(ctx context.Context, params LogQueryParams) ([]LogEnt
 	)
 	args = append(args, params.PerPage, offset)
 
-	rows, err := s.db.Pool.Query(ctx, listSQL, args...)
+	rows, err := s.db.Query(ctx, listSQL, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -372,7 +415,7 @@ func (s *Service) ListLogs(ctx context.Context, params LogQueryParams) ([]LogEnt
 // RecordLog inserts an audit log entry.
 func (s *Service) RecordLog(ctx context.Context, action, resource, resourceID string, data map[string]any, ip, userAgent string) error {
 	dataJSON, _ := json.Marshal(data)
-	_, err := s.db.Pool.Exec(ctx, `
+	err := s.db.Exec(ctx, `
 		INSERT INTO _audit_logs (action, resource, resource_id, data, ip, user_agent)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
 		action, resource, resourceID, dataJSON, ip, userAgent,

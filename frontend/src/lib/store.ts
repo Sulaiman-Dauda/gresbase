@@ -9,7 +9,7 @@ interface AppState {
   sidebarCollapsed: boolean
 
   login: (email: string, password: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   checkAuth: () => Promise<void>
   setSidebarCollapsed: (c: boolean) => void
 }
@@ -20,41 +20,38 @@ export const useStore = create<AppState>((set) => ({
   sidebarCollapsed: false,
 
   login: async (email, password) => {
+    // Auth tokens are returned as HttpOnly cookies (gb_access/gb_refresh) by the
+    // server; we keep the access token in memory only (not localStorage) so the
+    // Authorization header can also be sent within the session.
     const res = await api.login(email, password)
     api.setToken(res.token)
-    localStorage.setItem('gresbase_refresh', res.refreshToken)
     set({ admin: res.admin, isAuthenticated: true })
   },
 
-  logout: () => {
+  logout: async () => {
+    // Server clears the auth cookies; we drop in-memory state.
+    try {
+      await api.logout()
+    } catch {
+      // ignore network/logout errors — still clear local state
+    }
     api.setToken(null)
-    localStorage.removeItem('gresbase_token')
-    localStorage.removeItem('gresbase_refresh')
     set({ admin: null, isAuthenticated: false })
   },
 
   checkAuth: async () => {
-    const token = localStorage.getItem('gresbase_token')
-    if (!token) return
-    api.setToken(token)
+    // The gb_access HttpOnly cookie (if present) authenticates this call.
     try {
       const admin = await api.getMe()
       set({ admin, isAuthenticated: true })
     } catch {
-      // Try refresh
-      const refresh = localStorage.getItem('gresbase_refresh')
-      if (refresh) {
-        try {
-          const { token: newToken, refreshToken } = await api.refresh(refresh)
-          api.setToken(newToken)
-          localStorage.setItem('gresbase_token', newToken)
-          localStorage.setItem('gresbase_refresh', refreshToken)
-          const admin = await api.getMe()
-          set({ admin, isAuthenticated: true })
-        } catch {
-          localStorage.removeItem('gresbase_token')
-          localStorage.removeItem('gresbase_refresh')
-        }
+      // Try a cookie-based refresh, then retry.
+      try {
+        await api.refresh()
+        const admin = await api.getMe()
+        set({ admin, isAuthenticated: true })
+      } catch {
+        set({ admin: null, isAuthenticated: false })
       }
     }
   },

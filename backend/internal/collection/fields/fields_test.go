@@ -169,6 +169,9 @@ func TestSelectField_Validate(t *testing.T) {
 	if err != nil {
 		t.Errorf("valid multiple select failed: %v", err)
 	}
+	if valid == nil {
+		t.Error("nil result from valid multiple select")
+	}
 
 	_, err = f2.Validate([]string{"go", "rust", "js"})
 	if err == nil {
@@ -209,6 +212,9 @@ func TestFileField_Validate(t *testing.T) {
 	valid, err = f2.Validate([]string{"f1.pdf", "f2.pdf"})
 	if err != nil {
 		t.Errorf("valid multiple files failed: %v", err)
+	}
+	if valid == nil {
+		t.Error("nil result from valid multiple files")
 	}
 
 	_, err = f2.Validate([]string{"f1.pdf", "f2.pdf", "f3.pdf", "f4.pdf"})

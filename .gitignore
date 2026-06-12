@@ -35,8 +35,9 @@ coverage/
 .DS_Store
 Thumbs.db
 
-# Storage
-storage/
+# Storage (runtime file storage only — NOT the internal/storage source package)
+/storage/
+/backend/storage/
 .backups/
 .certmagic/
 

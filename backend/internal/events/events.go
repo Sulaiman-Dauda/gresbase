@@ -3,8 +3,17 @@ package events
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"strconv"
 	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/rs/zerolog/log"
 )
+
+// handlerIDCounter guarantees uniqueness for the fallback handler ID path when
+// crypto/rand is unavailable.
+var handlerIDCounter uint64
 
 // Priority levels for hooks.
 const (
@@ -25,14 +34,22 @@ type Event interface {
 
 	// Abort stops further propagation.
 	Abort()
+
+	baseEvent() *BaseEvent
+}
+
+// TagProvider allows events to expose matching tags for tagged handlers.
+type TagProvider interface {
+	EventTags() []string
 }
 
 // BaseEvent provides a default Event implementation.
 type BaseEvent struct {
-	mu         sync.RWMutex
-	aborted    bool
-	index      int
-	handlers   []Handler
+	mu       sync.RWMutex
+	aborted  bool
+	index    int
+	handlers []Handler
+	self     Event
 }
 
 // Next calls the next handler in the chain.
@@ -46,6 +63,9 @@ func (e *BaseEvent) Next() error {
 		e.index++
 		if handler.Func == nil {
 			continue
+		}
+		if e.self != nil {
+			return handler.Func(e.self)
 		}
 		return handler.Func(e)
 	}
@@ -73,6 +93,14 @@ func (e *BaseEvent) setHandlers(handlers []Handler) {
 	e.index = 0
 }
 
+func (e *BaseEvent) setSelf(event Event) {
+	e.self = event
+}
+
+func (e *BaseEvent) baseEvent() *BaseEvent {
+	return e
+}
+
 // Handler represents a handler function with metadata.
 type Handler struct {
 	ID       string
@@ -85,6 +113,12 @@ type Handler struct {
 type Hook struct {
 	mu       sync.RWMutex
 	handlers []Handler
+}
+
+// TaggedHook binds handlers with one or more static tags.
+type TaggedHook struct {
+	hook *Hook
+	tags []string
 }
 
 // NewHook creates a new Hook.
@@ -112,6 +146,22 @@ func (h *Hook) BindFunc(fn func(e Event) error) {
 	})
 }
 
+// Tagged returns a tagged view of the hook that binds handlers with the provided tags.
+func (h *Hook) Tagged(tags ...string) *TaggedHook {
+	return &TaggedHook{hook: h, tags: tags}
+}
+
+// Bind registers the provided handler using the tagged hook tags.
+func (th *TaggedHook) Bind(handler Handler) {
+	handler.Tags = uniqueTags(append(handler.Tags, th.tags...))
+	th.hook.Bind(handler)
+}
+
+// BindFunc registers a function handler using the tagged hook tags.
+func (th *TaggedHook) BindFunc(fn func(e Event) error) {
+	th.Bind(Handler{ID: generateHandlerID(), Func: fn, Priority: PriorityDefault})
+}
+
 // Unbind removes a handler by ID.
 func (h *Hook) Unbind(id string) {
 	h.mu.Lock()
@@ -128,16 +178,25 @@ func (h *Hook) Unbind(id string) {
 // Trigger fires the hook with the given event.
 func (h *Hook) Trigger(event Event, fn func(e Event) error) error {
 	h.mu.RLock()
-	handlers := make([]Handler, len(h.handlers))
-	copy(handlers, h.handlers)
+	handlers := make([]Handler, 0, len(h.handlers)+1)
+	eventTags := eventTags(event)
+	for _, handler := range h.handlers {
+		if shouldRunHandler(handler, eventTags) {
+			handlers = append(handlers, handler)
+		}
+	}
 	h.mu.RUnlock()
 
-	// Set up the handler chain
-	if be, ok := event.(*BaseEvent); ok {
-		be.setHandlers(handlers)
+	if fn != nil {
+		handlers = append(handlers, Handler{ID: "__final__", Func: fn, Priority: PriorityLowest})
 	}
 
-	return fn(event)
+	// Set up the handler chain
+	be := event.baseEvent()
+	be.setHandlers(handlers)
+	be.setSelf(event)
+
+	return event.Next()
 }
 
 // Handlers returns a copy of all handlers.
@@ -158,7 +217,13 @@ func (h *Hook) Len() int {
 
 func generateHandlerID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fall back to a monotonic, collision-free ID rather than risk a
+		// duplicate from a half-filled buffer.
+		log.Error().Err(err).Msg("crypto/rand unavailable; using fallback handler ID")
+		return "h" + strconv.FormatInt(time.Now().UnixNano(), 36) +
+			strconv.FormatUint(atomic.AddUint64(&handlerIDCounter, 1), 36)
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -171,4 +236,57 @@ func sortHandlers(handlers []Handler) {
 			}
 		}
 	}
+}
+
+func eventTags(event Event) map[string]struct{} {
+	tagger, ok := event.(TagProvider)
+	if !ok {
+		return nil
+	}
+	tags := tagger.EventTags()
+	if len(tags) == 0 {
+		return nil
+	}
+	result := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		if tag == "" {
+			continue
+		}
+		result[tag] = struct{}{}
+	}
+	return result
+}
+
+func shouldRunHandler(handler Handler, eventTags map[string]struct{}) bool {
+	if len(handler.Tags) == 0 {
+		return true
+	}
+	if len(eventTags) == 0 {
+		return false
+	}
+	for _, tag := range handler.Tags {
+		if _, ok := eventTags[tag]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueTags(tags []string) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(tags))
+	result := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if tag == "" {
+			continue
+		}
+		if _, exists := seen[tag]; exists {
+			continue
+		}
+		seen[tag] = struct{}{}
+		result = append(result, tag)
+	}
+	return result
 }

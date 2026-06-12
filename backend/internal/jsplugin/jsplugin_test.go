@@ -16,102 +16,6 @@ func TestNewRuntime(t *testing.T) {
 	}
 }
 
-func TestRuntime_LoadAndExecuteSimpleScript(t *testing.T) {
-	rt := NewRuntime(30 * time.Second)
-
-	_, err := rt.LoadPlugin("test", "test-plugin", "1 + 1", 0)
-	if err != nil {
-		t.Fatalf("LoadPlugin: %v", err)
-	}
-
-	result, err := rt.Execute("test", "1 + 1")
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if result.ToInteger() != 2 {
-		t.Errorf("expected 2, got %v", result)
-	}
-}
-
-func TestRuntime_ExecuteStringScript(t *testing.T) {
-	rt := NewRuntime(30 * time.Second)
-
-	rt.LoadPlugin("test", "test-plugin", "1", 0)
-
-	result, err := rt.Execute("test", `"Hello, " + "World!"`)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if result.String() != "Hello, World!" {
-		t.Errorf("expected Hello World, got %v", result.String())
-	}
-}
-
-func TestRuntime_ExecuteBooleanScript(t *testing.T) {
-	rt := NewRuntime(30 * time.Second)
-
-	rt.LoadPlugin("test", "test-plugin", "1", 0)
-
-	result, err := rt.Execute("test", "5 > 3")
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if !result.ToBoolean() {
-		t.Errorf("expected true, got %v", result)
-	}
-}
-
-func TestRuntime_ExecuteWithTimeout(t *testing.T) {
-	rt := NewRuntime(10 * time.Millisecond)
-
-	rt.LoadPlugin("timeout-test", "timeout", "1", 0)
-
-	_, err := rt.Execute("timeout-test", "while(true) {}")
-	if err == nil {
-		t.Error("expected timeout error for infinite loop")
-	}
-}
-
-func TestRuntime_ConsoleAPI(t *testing.T) {
-	rt := NewRuntime(30 * time.Second)
-
-	rt.LoadPlugin("test", "test-plugin", "1", 0)
-
-	_, err := rt.Execute("test", `console.log("test message"); 1`)
-	if err != nil {
-		t.Fatalf("Execute with console.log: %v", err)
-	}
-
-	_, err = rt.Execute("test", `console.error("error message"); 1`)
-	if err != nil {
-		t.Fatalf("Execute with console.error: %v", err)
-	}
-
-	_, err = rt.Execute("test", `console.warn("warning"); 1`)
-	if err != nil {
-		t.Fatalf("Execute with console.warn: %v", err)
-	}
-}
-
-func TestRuntime_JSONAPI(t *testing.T) {
-	rt := NewRuntime(30 * time.Second)
-
-	rt.LoadPlugin("test", "test-plugin", "1", 0)
-
-	_, err := rt.Execute("test", `var obj = {name: "test"}; JSON.stringify(obj)`)
-	if err != nil {
-		t.Fatalf("JSON.stringify: %v", err)
-	}
-
-	result, err := rt.Execute("test", `var parsed = JSON.parse('{"key":"value"}'); parsed.key`)
-	if err != nil {
-		t.Fatalf("JSON.parse: %v", err)
-	}
-	if result.String() != "value" {
-		t.Errorf("expected value, got %v", result.String())
-	}
-}
-
 func TestRuntime_LoadPlugin(t *testing.T) {
 	rt := NewRuntime(30 * time.Second)
 
@@ -120,7 +24,7 @@ func TestRuntime_LoadPlugin(t *testing.T) {
 		t.Fatalf("LoadPlugin: %v", err)
 	}
 	if plugin == nil {
-		t.Error("expected non-nil plugin")
+		t.Fatal("expected non-nil plugin")
 	}
 	if plugin.Name != "test" {
 		t.Errorf("expected name 'test', got %q", plugin.Name)
@@ -151,29 +55,6 @@ func TestRuntime_ListPlugins(t *testing.T) {
 	plugins := rt.ListPlugins()
 	if len(plugins) < 2 {
 		t.Errorf("expected at least 2 plugins, got %d", len(plugins))
-	}
-}
-
-func TestRuntime_GetPluginScript(t *testing.T) {
-	rt := NewRuntime(30 * time.Second)
-
-	rt.LoadPlugin("test-plugin", "test", `console.log("hello");`, 0)
-
-	script, err := rt.GetPluginScript("test-plugin")
-	if err != nil {
-		t.Fatalf("GetPluginScript: %v", err)
-	}
-	if script != `console.log("hello");` {
-		t.Errorf("expected original script")
-	}
-}
-
-func TestRuntime_GetPluginScript_NotFound(t *testing.T) {
-	rt := NewRuntime(30 * time.Second)
-
-	_, err := rt.GetPluginScript("nonexistent")
-	if err == nil {
-		t.Error("expected error for nonexistent plugin")
 	}
 }
 
@@ -216,17 +97,6 @@ func TestRuntime_TriggerHook(t *testing.T) {
 	}
 }
 
-func TestRuntime_ErrorHandling(t *testing.T) {
-	rt := NewRuntime(30 * time.Second)
-
-	rt.LoadPlugin("err-test", "error", "1", 0)
-
-	_, err := rt.Execute("err-test", "throw new Error('test error')")
-	if err == nil {
-		t.Error("expected error")
-	}
-}
-
 func TestRuntime_MultiplePlugins(t *testing.T) {
 	rt := NewRuntime(30 * time.Second)
 
@@ -244,21 +114,6 @@ func TestRuntime_MultiplePlugins(t *testing.T) {
 	}
 	if p2.Priority != 2 {
 		t.Errorf("expected priority 2")
-	}
-}
-
-func TestBuiltinPlugins(t *testing.T) {
-	plugins := BuiltinPlugins()
-	if len(plugins) == 0 {
-		t.Error("expected built-in plugins")
-	}
-	for id, script := range plugins {
-		if id == "" {
-			t.Error("expected non-empty plugin ID")
-		}
-		if script == "" {
-			t.Errorf("expected non-empty script for plugin %s", id)
-		}
 	}
 }
 

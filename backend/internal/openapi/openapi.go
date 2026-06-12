@@ -13,12 +13,12 @@ import (
 
 // Spec represents an OpenAPI 3.1 specification.
 type Spec struct {
-	OpenAPI      string              `json:"openapi"`
-	Info         Info                `json:"info"`
-	Servers      []Server            `json:"servers"`
-	Paths        map[string]PathItem `json:"paths"`
-	Components   *Components         `json:"components,omitempty"`
-	Tags         []Tag               `json:"tags,omitempty"`
+	OpenAPI    string              `json:"openapi"`
+	Info       Info                `json:"info"`
+	Servers    []Server            `json:"servers"`
+	Paths      map[string]PathItem `json:"paths"`
+	Components *Components         `json:"components,omitempty"`
+	Tags       []Tag               `json:"tags,omitempty"`
 }
 
 type Info struct {
@@ -33,37 +33,37 @@ type Server struct {
 }
 
 type PathItem struct {
-	Summary     string              `json:"summary,omitempty"`
-	Description string              `json:"description,omitempty"`
-	Get         *Operation          `json:"get,omitempty"`
-	Post        *Operation          `json:"post,omitempty"`
-	Put         *Operation          `json:"put,omitempty"`
-	Patch       *Operation          `json:"patch,omitempty"`
-	Delete      *Operation          `json:"delete,omitempty"`
-	Parameters  []Parameter         `json:"parameters,omitempty"`
+	Summary     string      `json:"summary,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Get         *Operation  `json:"get,omitempty"`
+	Post        *Operation  `json:"post,omitempty"`
+	Put         *Operation  `json:"put,omitempty"`
+	Patch       *Operation  `json:"patch,omitempty"`
+	Delete      *Operation  `json:"delete,omitempty"`
+	Parameters  []Parameter `json:"parameters,omitempty"`
 }
 
 type Operation struct {
-	Summary     string              `json:"summary,omitempty"`
-	Description string              `json:"description,omitempty"`
-	OperationID string              `json:"operationId,omitempty"`
-	Tags        []string            `json:"tags,omitempty"`
+	Summary     string                `json:"summary,omitempty"`
+	Description string                `json:"description,omitempty"`
+	OperationID string                `json:"operationId,omitempty"`
+	Tags        []string              `json:"tags,omitempty"`
 	Security    []map[string][]string `json:"security,omitempty"`
-	Parameters  []Parameter         `json:"parameters,omitempty"`
-	RequestBody *RequestBody        `json:"requestBody,omitempty"`
-	Responses   map[string]Response `json:"responses"`
+	Parameters  []Parameter           `json:"parameters,omitempty"`
+	RequestBody *RequestBody          `json:"requestBody,omitempty"`
+	Responses   map[string]Response   `json:"responses"`
 }
 
 type Parameter struct {
-	Name        string `json:"name"`
-	In          string `json:"in"`
-	Required    bool   `json:"required,omitempty"`
-	Description string `json:"description,omitempty"`
+	Name        string  `json:"name"`
+	In          string  `json:"in"`
+	Required    bool    `json:"required,omitempty"`
+	Description string  `json:"description,omitempty"`
 	Schema      *Schema `json:"schema,omitempty"`
 }
 
 type RequestBody struct {
-	Required bool              `json:"required,omitempty"`
+	Required bool                 `json:"required,omitempty"`
 	Content  map[string]MediaType `json:"content"`
 }
 
@@ -72,16 +72,16 @@ type MediaType struct {
 }
 
 type Response struct {
-	Description string              `json:"description"`
+	Description string               `json:"description"`
 	Content     map[string]MediaType `json:"content,omitempty"`
 }
 
 type Schema struct {
-	Type       string            `json:"type,omitempty"`
+	Type       string             `json:"type,omitempty"`
 	Properties map[string]*Schema `json:"properties,omitempty"`
-	Items      *Schema           `json:"items,omitempty"`
-	Format     string            `json:"format,omitempty"`
-	Example    any               `json:"example,omitempty"`
+	Items      *Schema            `json:"items,omitempty"`
+	Format     string             `json:"format,omitempty"`
+	Example    any                `json:"example,omitempty"`
 }
 
 type Components struct {
@@ -90,11 +90,11 @@ type Components struct {
 }
 
 type SecurityScheme struct {
-	Type        string `json:"type"`
-	Scheme      string `json:"scheme,omitempty"`
+	Type         string `json:"type"`
+	Scheme       string `json:"scheme,omitempty"`
 	BearerFormat string `json:"bearerFormat,omitempty"`
-	Name        string `json:"name,omitempty"`
-	In          string `json:"in,omitempty"`
+	Name         string `json:"name,omitempty"`
+	In           string `json:"in,omitempty"`
 }
 
 type Tag struct {
@@ -141,10 +141,10 @@ func Generate(version string, baseURL string, routes []RouteDef) *Spec {
 					"admin":        {Type: "object"},
 				}},
 				"Collection": {Type: "object", Properties: map[string]*Schema{
-					"id":      {Type: "string"},
-					"name":    {Type: "string"},
-					"type":    {Type: "string"},
-					"schema":  {Type: "array", Items: &Schema{Type: "object"}},
+					"id":     {Type: "string"},
+					"name":   {Type: "string"},
+					"type":   {Type: "string"},
+					"schema": {Type: "array", Items: &Schema{Type: "object"}},
 				}},
 				"RecordResponse": {Type: "object", Properties: map[string]*Schema{
 					"items":      {Type: "array", Items: &Schema{Type: "object"}},
@@ -164,8 +164,6 @@ func Generate(version string, baseURL string, routes []RouteDef) *Spec {
 			{Name: "Record Auth", Description: "End-user authentication for auth collections"},
 			{Name: "Files", Description: "File upload & download"},
 			{Name: "Realtime", Description: "SSE/WebSocket realtime subscriptions"},
-			{Name: "ACME", Description: "ACME certificate management"},
-			{Name: "Certificates", Description: "TLS certificate management"},
 			{Name: "Settings", Description: "Application settings"},
 			{Name: "Logs", Description: "Audit log management"},
 			{Name: "API Keys", Description: "API key management"},
@@ -181,13 +179,27 @@ func Generate(version string, baseURL string, routes []RouteDef) *Spec {
 			pathItem.Summary = route.Summary
 		}
 
+		successStatus := route.SuccessStatus
+		if successStatus == "" {
+			successStatus = "200"
+		}
+		responseSchema := route.ResponseSchema
+		if responseSchema == nil {
+			responseSchema = &Schema{Type: "object"}
+		}
+		responseContentType := route.ResponseContentType
+		if responseContentType == "" {
+			responseContentType = "application/json"
+		}
+
 		op := &Operation{
 			Summary:     route.Summary,
 			OperationID: route.OperationID,
 			Tags:        []string{route.Tag},
+			Parameters:  route.Parameters,
 			Responses: map[string]Response{
-				"200": {Description: "Success", Content: map[string]MediaType{
-					"application/json": {Schema: route.ResponseSchema},
+				successStatus: {Description: "Success", Content: map[string]MediaType{
+					responseContentType: {Schema: responseSchema},
 				}},
 				"400": {Description: "Bad request", Content: map[string]MediaType{
 					"application/json": {Schema: &Schema{Type: "object", Properties: map[string]*Schema{
@@ -200,14 +212,18 @@ func Generate(version string, baseURL string, routes []RouteDef) *Spec {
 		}
 
 		if route.AuthRequired {
-			op.Security = []map[string][]string{{"bearerAuth": {}}}
+			op.Security = []map[string][]string{{"bearerAuth": {}}, {"apiKey": {}}}
 		}
 
 		if route.RequestSchema != nil {
+			requestContentType := route.RequestContentType
+			if requestContentType == "" {
+				requestContentType = "application/json"
+			}
 			op.RequestBody = &RequestBody{
 				Required: true,
 				Content: map[string]MediaType{
-					"application/json": {Schema: route.RequestSchema},
+					requestContentType: {Schema: route.RequestSchema},
 				},
 			}
 		}
@@ -233,14 +249,18 @@ func Generate(version string, baseURL string, routes []RouteDef) *Spec {
 
 // RouteDef describes a single API route for OpenAPI generation.
 type RouteDef struct {
-	Method         string  // GET, POST, PUT, PATCH, DELETE
-	Pattern        string  // e.g., /api/v1/collections
-	Summary        string  // Short description
-	OperationID    string  // CamelCase operation ID
-	Tag            string  // Grouping tag
-	AuthRequired   bool    // Whether JWT auth is required
-	RequestSchema  *Schema // Request body schema (nil if no body)
-	ResponseSchema *Schema // Success response schema
+	Method              string      // GET, POST, PUT, PATCH, DELETE
+	Pattern             string      // e.g., /api/v1/collections
+	Summary             string      // Short description
+	OperationID         string      // CamelCase operation ID
+	Tag                 string      // Grouping tag
+	AuthRequired        bool        // Whether JWT or API key auth is required
+	Parameters          []Parameter // Path/query parameters
+	RequestSchema       *Schema     // Request body schema (nil if no body)
+	RequestContentType  string      // Request content type (defaults to application/json)
+	ResponseSchema      *Schema     // Success response schema
+	ResponseContentType string      // Response content type (defaults to application/json)
+	SuccessStatus       string      // Success status code (defaults to 200)
 }
 
 // ExtractRoutes walks a chi router and extracts route definitions.
@@ -251,19 +271,242 @@ func ExtractRoutes(r chi.Router) []RouteDef {
 }
 
 func walkChiRouter(r chi.Router, prefix string, routes *[]RouteDef) {
-	if err := chi.Walk(r, func(method, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
-		// Extract route info
+	// chi.Walk only errors on a malformed router (a programming error during
+	// boot); the spec is best-effort, so any failure leaves routes as-is.
+	_ = chi.Walk(r, func(method, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
+		if !shouldDocumentMethod(method) {
+			return nil
+		}
+		pattern := prefix + route
 		def := RouteDef{
-			Method:      method,
-			Pattern:     prefix + route,
-			Summary:     summarizeRoute(method, route),
-			OperationID: operationIDFromRoute(method, route),
-			Tag:         tagFromRoute(route),
+			Method:              method,
+			Pattern:             pattern,
+			Summary:             summarizeRoute(method, pattern),
+			OperationID:         operationIDFromRoute(method, pattern),
+			Tag:                 tagFromRoute(pattern),
+			AuthRequired:        authRequiredForRoute(method, pattern),
+			Parameters:          parametersForRoute(method, pattern),
+			RequestSchema:       requestSchemaForRoute(method, pattern),
+			RequestContentType:  requestContentTypeForRoute(method, pattern),
+			ResponseSchema:      responseSchemaForRoute(method, pattern),
+			ResponseContentType: responseContentTypeForRoute(method, pattern),
+			SuccessStatus:       successStatusForRoute(method, pattern),
 		}
 		*routes = append(*routes, def)
 		return nil
-	}); err != nil {
-		// Walk failed silently
+	})
+}
+
+func shouldDocumentMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func authRequiredForRoute(method, route string) bool {
+	switch {
+	case route == "/api/v1/auth/logout", route == "/api/v1/auth/request-email-change":
+		return true
+	case strings.HasPrefix(route, "/api/v1/admin"):
+		return true
+	case strings.Contains(route, "/api/v1/collections/") && strings.Contains(route, "/auth/"):
+		return strings.Contains(route, "/impersonate/")
+	case strings.Contains(route, "/api/v1/collections/") && strings.Contains(route, "/auth-methods"):
+		return false
+	case strings.HasPrefix(route, "/api/v1/collections"):
+		return true
+	case route == "/api/v1/files/upload":
+		return true
+	case strings.HasPrefix(route, "/api/v1/files/") && method == http.MethodDelete:
+		return true
+	case strings.HasPrefix(route, "/api/v1/certificates"):
+		return true
+	case strings.HasPrefix(route, "/api/v1/settings"):
+		return true
+	case strings.HasPrefix(route, "/api/v1/logs"):
+		return true
+	case strings.HasPrefix(route, "/api/v1/api-keys"):
+		return true
+	case strings.HasPrefix(route, "/api/v1/backups"):
+		return true
+	case strings.HasPrefix(route, "/api/v1/fts"):
+		return true
+	case strings.HasPrefix(route, "/api/v1/jobs"):
+		return true
+	default:
+		return false
+	}
+}
+
+func parametersForRoute(method, route string) []Parameter {
+	params := extractPathParameters(route)
+
+	switch {
+	case method == http.MethodGet && strings.HasPrefix(route, "/api/v1/records/") && !strings.Contains(route, "{recordId}"):
+		params = append(params,
+			Parameter{Name: "page", In: "query", Schema: &Schema{Type: "integer"}},
+			Parameter{Name: "perPage", In: "query", Schema: &Schema{Type: "integer"}},
+			Parameter{Name: "sort", In: "query", Schema: &Schema{Type: "string"}},
+			Parameter{Name: "filter", In: "query", Schema: &Schema{Type: "string"}},
+			Parameter{Name: "expand", In: "query", Schema: &Schema{Type: "string"}},
+			Parameter{Name: "fields", In: "query", Schema: &Schema{Type: "string"}},
+		)
+	case method == http.MethodGet && strings.HasPrefix(route, "/api/v1/logs"):
+		params = append(params,
+			Parameter{Name: "page", In: "query", Schema: &Schema{Type: "integer"}},
+			Parameter{Name: "perPage", In: "query", Schema: &Schema{Type: "integer"}},
+			Parameter{Name: "action", In: "query", Schema: &Schema{Type: "string"}},
+			Parameter{Name: "resource", In: "query", Schema: &Schema{Type: "string"}},
+		)
+	}
+
+	return params
+}
+
+func extractPathParameters(route string) []Parameter {
+	parts := strings.Split(strings.Trim(route, "/"), "/")
+	params := make([]Parameter, 0)
+	for _, part := range parts {
+		if len(part) < 3 || part[0] != '{' || part[len(part)-1] != '}' {
+			continue
+		}
+		name := part[1 : len(part)-1]
+		params = append(params, Parameter{
+			Name:     name,
+			In:       "path",
+			Required: true,
+			Schema:   &Schema{Type: "string"},
+		})
+	}
+	return params
+}
+
+func routeHasRequestBody(method, route string) bool {
+	switch method {
+	case http.MethodPut, http.MethodPatch:
+		return true
+	case http.MethodPost:
+		switch {
+		case route == "/api/v1/auth/logout":
+			return false
+		case strings.HasSuffix(route, "/run"):
+			return false
+		case strings.HasSuffix(route, "/restore"):
+			return false
+		default:
+			return true
+		}
+	default:
+		return false
+	}
+}
+
+func requestSchemaForRoute(method, route string) *Schema {
+	if !routeHasRequestBody(method, route) {
+		return nil
+	}
+
+	switch {
+	case strings.Contains(route, "/auth/login"):
+		return &Schema{Type: "object", Properties: map[string]*Schema{
+			"email":    {Type: "string", Format: "email"},
+			"password": {Type: "string", Format: "password"},
+		}}
+	case strings.Contains(route, "/auth/refresh") || strings.Contains(route, "/auth-refresh"):
+		return &Schema{Type: "object", Properties: map[string]*Schema{
+			"refreshToken": {Type: "string"},
+		}}
+	case route == "/api/v1/setup", strings.Contains(route, "/auth/register"), route == "/api/v1/admin/users":
+		return &Schema{Type: "object", Properties: map[string]*Schema{
+			"email":    {Type: "string", Format: "email"},
+			"password": {Type: "string", Format: "password"},
+			"role":     {Type: "string"},
+		}}
+	case strings.HasPrefix(route, "/api/v1/batch"):
+		return &Schema{Type: "object", Properties: map[string]*Schema{
+			"requests": {Type: "array", Items: &Schema{Type: "object"}},
+		}}
+	case route == "/api/v1/files/upload":
+		return &Schema{Type: "object", Properties: map[string]*Schema{
+			"collection": {Type: "string"},
+			"recordId":   {Type: "string"},
+			"file":       {Type: "string", Format: "binary"},
+		}}
+	default:
+		return &Schema{Type: "object"}
+	}
+}
+
+func requestContentTypeForRoute(method, route string) string {
+	if !routeHasRequestBody(method, route) {
+		return ""
+	}
+	if route == "/api/v1/files/upload" {
+		return "multipart/form-data"
+	}
+	return "application/json"
+}
+
+func responseSchemaForRoute(method, route string) *Schema {
+	switch {
+	case strings.Contains(route, "/health"):
+		return &Schema{Type: "object", Properties: map[string]*Schema{
+			"status":    {Type: "string"},
+			"version":   {Type: "string"},
+			"database":  {Type: "boolean"},
+			"timestamp": {Type: "string", Format: "date-time"},
+		}}
+	case strings.HasPrefix(route, "/api/v1/records/") && method == http.MethodGet && !strings.Contains(route, "{recordId}"):
+		return &Schema{Type: "object", Properties: map[string]*Schema{
+			"items":      {Type: "array", Items: &Schema{Type: "object"}},
+			"page":       {Type: "integer"},
+			"perPage":    {Type: "integer"},
+			"totalItems": {Type: "integer"},
+			"totalPages": {Type: "integer"},
+		}}
+	case route == "/api/v1/files/upload":
+		return &Schema{Type: "object", Properties: map[string]*Schema{
+			"path":          {Type: "string"},
+			"original_name": {Type: "string"},
+		}}
+	case (strings.HasPrefix(route, "/api/v1/files/") && method == http.MethodGet) || strings.Contains(route, "/download"):
+		return &Schema{Type: "string", Format: "binary"}
+	default:
+		return &Schema{Type: "object"}
+	}
+}
+
+func responseContentTypeForRoute(method, route string) string {
+	switch {
+	case strings.HasPrefix(route, "/api/v1/files/") && method == http.MethodGet:
+		return "application/octet-stream"
+	case strings.Contains(route, "/backups/") && strings.Contains(route, "/download"):
+		return "application/octet-stream"
+	default:
+		return "application/json"
+	}
+}
+
+func successStatusForRoute(method, route string) string {
+	if method != http.MethodPost {
+		return "200"
+	}
+	switch route {
+	case "/api/v1/setup",
+		"/api/v1/auth/register",
+		"/api/v1/admin/users",
+		"/api/v1/collections/",
+		"/api/v1/records/{collection}/",
+		"/api/v1/files/upload",
+		"/api/v1/api-keys/",
+		"/api/v1/backups/",
+		"/api/v1/jobs/":
+		return "201"
+	default:
+		return "200"
 	}
 }
 
@@ -271,6 +514,24 @@ func summarizeRoute(method, route string) string {
 	switch {
 	case strings.Contains(route, "health"):
 		return "Health check"
+	case strings.Contains(route, "/collections/") && strings.Contains(route, "/auth-methods"):
+		return "List record auth methods"
+	case strings.Contains(route, "/collections/") && strings.Contains(route, "/auth/auth-with-password"):
+		return "Authenticate record with password"
+	case strings.Contains(route, "/collections/") && strings.Contains(route, "/auth/auth-with-anonymous"):
+		return "Authenticate as a new anonymous record"
+	case strings.Contains(route, "/collections/") && strings.Contains(route, "/auth/auth-with-otp"):
+		return "Authenticate record with OTP"
+	case strings.Contains(route, "/collections/") && strings.Contains(route, "/auth-refresh"):
+		return "Refresh record auth token"
+	case strings.Contains(route, "/collections/") && strings.Contains(route, "/auth/passkey/register"):
+		return "Register a passkey (WebAuthn) for the authenticated record"
+	case strings.Contains(route, "/collections/") && strings.Contains(route, "/auth/passkey/login"):
+		return "Authenticate record with a passkey (WebAuthn)"
+	case strings.Contains(route, "/collections/") && strings.Contains(route, "/auth/passkeys"):
+		return "List or delete the authenticated record's passkeys"
+	case strings.Contains(route, "/collections/") && strings.Contains(route, "/auth/"):
+		return "Record authentication"
 	case strings.Contains(route, "auth/login"):
 		return "Admin login"
 	case strings.Contains(route, "auth/refresh"):
@@ -281,26 +542,47 @@ func summarizeRoute(method, route string) string {
 		return "OTP authentication"
 	case strings.Contains(route, "auth/magic-link"):
 		return "Magic link authentication"
+	case strings.Contains(route, "/collections/export"):
+		return "Export collections"
+	case strings.Contains(route, "/collections/import"):
+		return "Import collections"
 	case strings.Contains(route, "collections"):
-		if method == "GET" {
+		if method == http.MethodGet {
+			if strings.Contains(route, "{id}") {
+				return "Get collection"
+			}
 			return "List collections"
 		}
-		if method == "POST" {
+		if method == http.MethodPost {
 			return "Create collection"
 		}
+		if method == http.MethodDelete {
+			return "Delete collection"
+		}
 		return "Manage collection"
+	case strings.Contains(route, "/records/") && strings.Contains(route, "/aggregate"):
+		return "Aggregate records (count/sum/avg/min/max with groupBy)"
+	case strings.Contains(route, "/realtime/broadcast"):
+		return "Broadcast a message to a realtime channel"
+	case strings.Contains(route, "/files/tus"):
+		return "Resumable file upload (TUS protocol): POST creates an upload targeting an existing record's file field, PATCH appends chunks, HEAD retrieves the offset, DELETE terminates"
 	case strings.Contains(route, "records"):
-		if method == "GET" {
+		if method == http.MethodGet {
+			if strings.Contains(route, "{recordId}") {
+				return "Get record"
+			}
 			return "List records"
 		}
-		if method == "POST" {
+		if method == http.MethodPost {
 			return "Create record"
 		}
-		if method == "PUT" || method == "PATCH" {
+		if method == http.MethodPut || method == http.MethodPatch {
 			return "Update record"
 		}
 		return "Delete record"
-	case strings.Contains(route, "realtime"):
+	case strings.Contains(route, "/batch"):
+		return "Batch request"
+	case strings.Contains(route, "realtime") || strings.Contains(route, "sse"):
 		return "Realtime subscription"
 	case strings.Contains(route, "backups"):
 		return "Backup management"
@@ -316,7 +598,7 @@ func operationIDFromRoute(method, route string) string {
 		if strings.HasPrefix(p, "{") || strings.HasPrefix(p, ":") {
 			continue // skip path params
 		}
-		id += strings.Title(strings.ReplaceAll(p, "-", "_"))
+		id += titleASCII(strings.ReplaceAll(p, "-", "_"))
 	}
 	return id
 }
@@ -325,6 +607,8 @@ func tagFromRoute(route string) string {
 	switch {
 	case strings.Contains(route, "health"):
 		return "Health"
+	case strings.Contains(route, "/collections/") && (strings.Contains(route, "/auth/") || strings.Contains(route, "/auth-methods")):
+		return "Record Auth"
 	case strings.Contains(route, "auth") || strings.Contains(route, "oauth"):
 		return "Auth"
 	case strings.Contains(route, "admin"):
@@ -337,10 +621,6 @@ func tagFromRoute(route string) string {
 		return "Files"
 	case strings.Contains(route, "realtime") || strings.Contains(route, "sse"):
 		return "Realtime"
-	case strings.Contains(route, "acme"):
-		return "ACME"
-	case strings.Contains(route, "certificates"):
-		return "Certificates"
 	case strings.Contains(route, "settings"):
 		return "Settings"
 	case strings.Contains(route, "logs"):
@@ -353,8 +633,6 @@ func tagFromRoute(route string) string {
 		return "Search"
 	case strings.Contains(route, "jobs"):
 		return "Jobs"
-	case strings.Contains(route, "plugins"):
-		return "Plugins"
 	default:
 		return "General"
 	}
@@ -370,10 +648,20 @@ func Handler(spec *Spec) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		json.NewEncoder(w).Encode(spec)
+		_ = json.NewEncoder(w).Encode(spec) // response already committed; nothing to do on encode failure
 	}
 }
 
-// Ensure imports are used
-var _ = strings.Title
-var _ = chi.Walk
+// titleASCII upper-cases the first byte of an ASCII identifier segment. It
+// replaces the deprecated strings.Title for the simple identifier casing used
+// when building operation IDs (segments are ASCII path components).
+func titleASCII(s string) string {
+	if s == "" {
+		return s
+	}
+	b := []byte(s)
+	if b[0] >= 'a' && b[0] <= 'z' {
+		b[0] -= 'a' - 'A'
+	}
+	return string(b)
+}

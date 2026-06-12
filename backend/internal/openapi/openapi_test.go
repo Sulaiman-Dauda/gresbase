@@ -19,13 +19,13 @@ func TestGenerate_Basic(t *testing.T) {
 			ResponseSchema: &Schema{Type: "object"},
 		},
 		{
-			Method:         "POST",
-			Pattern:        "/api/v1/auth/login",
-			Summary:        "Admin login",
-			OperationID:    "postAuthLogin",
-			Tag:            "Auth",
-			AuthRequired:   true,
-			RequestSchema:  &Schema{Type: "object", Properties: map[string]*Schema{
+			Method:       "POST",
+			Pattern:      "/api/v1/auth/login",
+			Summary:      "Admin login",
+			OperationID:  "postAuthLogin",
+			Tag:          "Auth",
+			AuthRequired: true,
+			RequestSchema: &Schema{Type: "object", Properties: map[string]*Schema{
 				"email":    {Type: "string", Format: "email"},
 				"password": {Type: "string", Format: "password"},
 			}},
@@ -228,15 +228,12 @@ func TestTagFromRoute(t *testing.T) {
 		{"/api/v1/files/a/b/c", "Files"},
 		{"/api/v1/realtime", "Realtime"},
 		{"/api/v1/sse", "Realtime"},
-		{"/api/v1/acme/directory", "ACME"},
-		{"/api/v1/certificates", "Certificates"},
 		{"/api/v1/settings", "Settings"},
 		{"/api/v1/logs", "Logs"},
 		{"/api/v1/api-keys", "API Keys"},
 		{"/api/v1/backups", "Backups"},
 		{"/api/v1/search", "Search"},
 		{"/api/v1/jobs", "Jobs"},
-		{"/api/v1/plugins", "Plugins"},
 		{"/api/v1/unknown", "General"},
 	}
 
