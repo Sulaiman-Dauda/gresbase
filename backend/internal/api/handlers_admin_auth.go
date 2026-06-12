@@ -531,14 +531,19 @@ func (h *Handlers) AdminUpdateMe(w http.ResponseWriter, r *http.Request) {
 		if err := h.app.Auth().UpdateAdmin(r.Context(), adminID, updates); err != nil {
 			return err
 		}
-		admin, _ = h.app.Auth().FindAdminByID(r.Context(), adminID)
-		return nil
+		var lookupErr error
+		admin, lookupErr = h.app.Auth().FindAdminByID(r.Context(), adminID)
+		return lookupErr
 	}); err != nil {
 		if _, ok := err.(forms.Errors); ok {
 			writeValidationError(w, err)
 			return
 		}
 		writeInternalError(w, "Failed to update", err)
+		return
+	}
+	if admin == nil {
+		writeInternalError(w, "Failed to update", fmt.Errorf("admin %q not found after update", adminID))
 		return
 	}
 
@@ -665,14 +670,19 @@ func (h *Handlers) AdminUpdate(w http.ResponseWriter, r *http.Request) {
 		if err := h.app.Auth().UpdateAdmin(r.Context(), id, updates); err != nil {
 			return err
 		}
-		admin, _ = h.app.Auth().FindAdminByID(r.Context(), id)
-		return nil
+		var lookupErr error
+		admin, lookupErr = h.app.Auth().FindAdminByID(r.Context(), id)
+		return lookupErr
 	}); err != nil {
 		if _, ok := err.(forms.Errors); ok {
 			writeValidationError(w, err)
 			return
 		}
 		writeInternalError(w, "Failed to update", err)
+		return
+	}
+	if admin == nil {
+		writeInternalError(w, "Failed to update", fmt.Errorf("admin %q not found after update", id))
 		return
 	}
 

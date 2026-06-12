@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"runtime"
+	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -79,12 +81,32 @@ type StorageMetrics struct {
 	TotalSize int64  `json:"total_size_bytes,omitempty"`
 }
 
+// httpDurationBuckets are the cumulative upper bounds (in seconds) for the
+// HTTP request-duration histogram. They follow the conventional Prometheus
+// client default latency buckets.
+var httpDurationBuckets = []float64{
+	0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
+}
+
+// httpStatusKey identifies a request-count series by method and status class.
+type httpStatusKey struct {
+	method string
+	status string
+}
+
 // Collector gathers and reports system metrics.
 type Collector struct {
 	startTime      time.Time
 	queryCount     atomic.Int64
 	slowQueryCount atomic.Int64
 	totalQueryTime atomic.Int64 // nanoseconds
+
+	// HTTP request metrics.
+	httpMu         sync.Mutex
+	httpRequests   map[httpStatusKey]int64
+	httpDurSum     float64
+	httpDurCount   int64
+	httpDurBuckets []int64 // cumulative counts aligned with httpDurationBuckets
 
 	// Callbacks set by the App layer
 	DBStats       func() (open, idle, max int32)
@@ -98,8 +120,71 @@ type Collector struct {
 // NewCollector creates a metrics collector with the current time as start.
 func NewCollector() *Collector {
 	return &Collector{
-		startTime: time.Now(),
+		startTime:      time.Now(),
+		httpRequests:   make(map[httpStatusKey]int64),
+		httpDurBuckets: make([]int64, len(httpDurationBuckets)),
 	}
+}
+
+// RecordHTTPRequest records one completed HTTP request for metrics: it bumps
+// the per-method/status counter and the request-duration histogram.
+func (c *Collector) RecordHTTPRequest(method, status string, duration time.Duration) {
+	if method == "" {
+		method = "UNKNOWN"
+	}
+	secs := duration.Seconds()
+
+	c.httpMu.Lock()
+	defer c.httpMu.Unlock()
+	c.httpRequests[httpStatusKey{method: method, status: status}]++
+	c.httpDurSum += secs
+	c.httpDurCount++
+	for i, ub := range httpDurationBuckets {
+		if secs <= ub {
+			c.httpDurBuckets[i]++
+		}
+	}
+}
+
+// httpSnapshot is a consistent point-in-time copy of the HTTP metrics.
+type httpSnapshot struct {
+	requests map[httpStatusKey]int64
+	durSum   float64
+	durCount int64
+	buckets  []int64
+}
+
+func (c *Collector) httpStats() httpSnapshot {
+	c.httpMu.Lock()
+	defer c.httpMu.Unlock()
+	reqs := make(map[httpStatusKey]int64, len(c.httpRequests))
+	for k, v := range c.httpRequests {
+		reqs[k] = v
+	}
+	buckets := make([]int64, len(c.httpDurBuckets))
+	copy(buckets, c.httpDurBuckets)
+	return httpSnapshot{
+		requests: reqs,
+		durSum:   c.httpDurSum,
+		durCount: c.httpDurCount,
+		buckets:  buckets,
+	}
+}
+
+// sortedHTTPKeys returns request-count keys in a stable order so exposition
+// output is deterministic.
+func sortedHTTPKeys(m map[httpStatusKey]int64) []httpStatusKey {
+	keys := make([]httpStatusKey, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].method != keys[j].method {
+			return keys[i].method < keys[j].method
+		}
+		return keys[i].status < keys[j].status
+	})
+	return keys
 }
 
 // RecordQuery records a query execution for metrics.

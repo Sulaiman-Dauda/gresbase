@@ -97,6 +97,14 @@ func (c *Collector) PrometheusHandler(version string) http.HandlerFunc {
 			p.sample("gresbase_db_connections", []string{"state", "open"}, strconv.FormatInt(int64(open), 10))
 			p.sample("gresbase_db_connections", []string{"state", "idle"}, strconv.FormatInt(int64(idle), 10))
 			p.gaugeInt("gresbase_db_max_connections", "Maximum allowed database connections.", int64(max))
+			// Pool utilization: acquired (open) connections as a fraction of the
+			// max. 0 when no max is reported.
+			util := 0.0
+			if max > 0 {
+				util = float64(open) / float64(max)
+			}
+			p.family("gresbase_db_pool_utilization", "Database connection-pool utilization (acquired/max), 0..1.", "gauge")
+			p.sample("gresbase_db_pool_utilization", nil, formatFloat(util))
 			p.counterInt("gresbase_db_queries_total", "Total number of database queries executed.", c.queryCount.Load())
 			p.counterInt("gresbase_db_slow_queries_total", "Total number of slow database queries.", c.slowQueryCount.Load())
 			querySeconds := float64(c.totalQueryTime.Load()) / 1e9
@@ -122,6 +130,29 @@ func (c *Collector) PrometheusHandler(version string) http.HandlerFunc {
 			}
 			p.gaugeInt("gresbase_realtime_wal_healthy", "Whether the WAL change-capture stream is established (1) or degraded to API-emitted events (0).", healthyVal)
 		}
+
+		// HTTP request metrics.
+		hs := c.httpStats()
+		p.family("gresbase_http_requests_total", "Total HTTP requests by method and status class.", "counter")
+		for _, key := range sortedHTTPKeys(hs.requests) {
+			p.sample("gresbase_http_requests_total",
+				[]string{"method", key.method, "status", key.status},
+				strconv.FormatInt(hs.requests[key], 10))
+		}
+		// The histogram is exposed as three derived series. This codebase
+		// declares a HELP/TYPE family for every distinct sample name (see the
+		// db_query_duration_seconds_sum counter above), so do the same here.
+		p.family("gresbase_http_request_duration_seconds_bucket", "HTTP request latency in seconds (cumulative histogram buckets).", "histogram")
+		for i, ub := range httpDurationBuckets {
+			p.sample("gresbase_http_request_duration_seconds_bucket",
+				[]string{"le", formatFloat(ub)}, strconv.FormatInt(hs.buckets[i], 10))
+		}
+		p.sample("gresbase_http_request_duration_seconds_bucket",
+			[]string{"le", "+Inf"}, strconv.FormatInt(hs.durCount, 10))
+		p.family("gresbase_http_request_duration_seconds_sum", "Cumulative HTTP request latency in seconds.", "counter")
+		p.sample("gresbase_http_request_duration_seconds_sum", nil, formatFloat(hs.durSum))
+		p.family("gresbase_http_request_duration_seconds_count", "Total observed HTTP requests in the latency histogram.", "counter")
+		p.sample("gresbase_http_request_duration_seconds_count", nil, strconv.FormatInt(hs.durCount, 10))
 
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)

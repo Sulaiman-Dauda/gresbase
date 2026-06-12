@@ -16,6 +16,17 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// DoS guards on dynamic queries.
+const (
+	// maxPaginationOffset bounds how deep clients may paginate. Deep OFFSETs
+	// force Postgres to scan and discard every preceding row.
+	maxPaginationOffset = 1_000_000
+	// maxExpandIDs bounds the id-list size of a single relation-expansion
+	// IN (...) query, so a pathological page of records cannot generate an
+	// arbitrarily large query.
+	maxExpandIDs = 500
+)
+
 // CollectionType defines the type of collection.
 type CollectionType string
 
@@ -890,6 +901,13 @@ func (s *Service) ListRecords(ctx context.Context, coll *Collection, filterStr, 
 	}
 
 	offset := (page - 1) * perPage
+	// Bound the OFFSET: deep pagination forces Postgres to scan and discard
+	// every preceding row, so an attacker-supplied page far beyond the data
+	// turns a cheap query into an expensive one. Reject rather than compute an
+	// unbounded OFFSET.
+	if offset > maxPaginationOffset {
+		return nil, 0, fmt.Errorf("pagination offset %d exceeds maximum of %d", offset, maxPaginationOffset)
+	}
 
 	// For view collections, we can't use WHERE on the view query itself, wrap it
 	source := s.quoteIdent(coll.Name)
@@ -1148,6 +1166,11 @@ func (s *Service) expandRelationField(ctx context.Context, records []Record, fie
 	for id := range ids {
 		idList = append(idList, id)
 	}
+	// Cap the IN (...) list so a pathological page of records with thousands
+	// of distinct relation ids cannot generate an unbounded query.
+	if len(idList) > maxExpandIDs {
+		idList = idList[:maxExpandIDs]
+	}
 
 	placeholders := make([]string, len(idList))
 	args := make([]any, len(idList))
@@ -1178,10 +1201,14 @@ func (s *Service) expandRelationField(ctx context.Context, records []Record, fie
 	}
 
 	for _, record := range records {
-		if _, ok := record["expand"]; !ok {
-			record["expand"] = make(map[string]any)
+		// "expand" may already hold a value of an unexpected type (e.g. a
+		// column literally named "expand"); use comma-ok so a bad type
+		// fails safe by re-initializing rather than panicking.
+		expandMap, ok := record["expand"].(map[string]any)
+		if !ok {
+			expandMap = make(map[string]any)
+			record["expand"] = expandMap
 		}
-		expandMap := record["expand"].(map[string]any)
 
 		switch v := record[field.Name].(type) {
 		case string:

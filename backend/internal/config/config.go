@@ -92,6 +92,11 @@ type Config struct {
 	// automatically. Empty disables the feature.
 	MigrationsDir string `mapstructure:"migrations_dir"`
 
+	// MigrationApplyTimeout bounds how long the collection schema migration
+	// replay on boot may run. Large schemas (many collections / big ALTERs)
+	// can take a while, so this is generous by default. 0 means no timeout.
+	MigrationApplyTimeout time.Duration `mapstructure:"migration_apply_timeout"`
+
 	// DatabaseReplicaURL, when set alongside an external DATABASE_URL, routes
 	// replica-safe reads (record lists, aggregations, relation expansion) to a
 	// PostgreSQL read replica. Writes and rule-feeding reads stay on the
@@ -221,6 +226,7 @@ func DefaultConfig() *Config {
 		HooksDir:                 "./gb_hooks",
 		HooksWatch:               true,
 		MigrationsDir:            "./gb_migrations",
+		MigrationApplyTimeout:    60 * time.Second,
 		RateLimitEnabled:         true,
 		RateLimitRPS:             100,
 		RateLimitBurst:           200,

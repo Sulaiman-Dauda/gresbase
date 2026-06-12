@@ -125,6 +125,12 @@ type App struct {
 	boundPlugins map[string]struct{}
 	mu           sync.RWMutex
 	ready        bool
+
+	// bgCtx scopes long-lived background goroutines (cluster listener, WAL
+	// capture, hooks-dir watcher). Cancelled at the start of Shutdown so they
+	// stop cleanly instead of leaking past process teardown.
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
 }
 
 // New creates a new App instance. Does NOT connect to the database yet.
@@ -204,6 +210,10 @@ func (app *App) Bootstrap() error {
 	}
 
 	log.Info().Msg("Bootstrapping Gresbase...")
+
+	// Scope all long-lived background goroutines to a cancellable context so
+	// Shutdown() can stop them deterministically.
+	app.bgCtx, app.bgCancel = context.WithCancel(context.Background())
 
 	// 1. Connect to database
 	db, err := database.New(app.cfg)
@@ -287,7 +297,7 @@ func (app *App) Bootstrap() error {
 		}
 		if app.cfg.HooksWatch {
 			if _, statErr := os.Stat(dir); statErr == nil {
-				go app.jsRuntime.WatchHooksDir(context.Background(), dir, 2*time.Second)
+				go app.jsRuntime.WatchHooksDir(app.bgCtx, dir, 2*time.Second)
 			}
 		}
 	}
@@ -371,7 +381,17 @@ func (app *App) Bootstrap() error {
 	// on boot. Runs after Gresbase's own migrations (so _collections exists)
 	// and before serving. Fail-closed: a bad file aborts startup.
 	app.schemaMigrate = schemamigrate.New(app.db, app.collections, app.cfg.MigrationsDir)
-	appliedSchema, err := app.schemaMigrate.Apply(context.Background())
+	// Large schema migrations (many collections / heavy ALTERs) need a generous,
+	// configurable deadline so they don't fail spuriously on a short timeout.
+	migrateCtx := context.Background()
+	var migrateCancel context.CancelFunc
+	if app.cfg.MigrationApplyTimeout > 0 {
+		migrateCtx, migrateCancel = context.WithTimeout(migrateCtx, app.cfg.MigrationApplyTimeout)
+	}
+	appliedSchema, err := app.schemaMigrate.Apply(migrateCtx)
+	if migrateCancel != nil {
+		migrateCancel()
+	}
 	if err != nil {
 		return fmt.Errorf("collection schema migrations: %w", err)
 	}
@@ -401,7 +421,7 @@ func (app *App) Bootstrap() error {
 		app.realtimeHub.EnableCluster(func(ctx context.Context, payload string) error {
 			return app.db.Notify(ctx, realtime.ClusterChannel, payload)
 		})
-		go app.realtimeHub.RunClusterListener(context.Background(), app.db)
+		go app.realtimeHub.RunClusterListener(app.bgCtx, app.db)
 		log.Info().Msg("Realtime cluster mode enabled (Postgres LISTEN/NOTIFY)")
 	}
 
@@ -431,7 +451,7 @@ func (app *App) Bootstrap() error {
 		app.onCollectionUpdate.BindFunc(syncPublication)
 		app.onCollectionDelete.BindFunc(syncPublication)
 
-		go app.walCapture.Run(context.Background())
+		go app.walCapture.Run(app.bgCtx)
 		log.Info().Str("slot", app.cfg.RealtimeWALSlot).Str("publication", app.cfg.RealtimeWALPublication).
 			Msg("Realtime WAL change capture enabled (logical replication)")
 	}
@@ -480,12 +500,22 @@ func (app *App) Serve() error {
 func (app *App) Shutdown() {
 	log.Info().Msg("Shutting down Gresbase...")
 
+	// 1. Stop accepting new background work.
 	if app.jobScheduler != nil {
 		app.jobScheduler.Stop()
 	}
 	if app.webhookService != nil {
 		app.webhookService.Stop()
 	}
+
+	// 2. Cancel long-lived background goroutines (cluster listener, WAL
+	// capture loop, hooks-dir watcher) so they unwind before subsystems and
+	// the DB pool go away.
+	if app.bgCancel != nil {
+		app.bgCancel()
+	}
+
+	// 3. Stop subsystems, then close the DB last.
 	if app.walCapture != nil {
 		// Stops the stream, sends a final standby status update, and closes
 		// the replication connection before the hub goes away.

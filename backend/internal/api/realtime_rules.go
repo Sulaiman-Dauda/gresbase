@@ -91,12 +91,16 @@ func (c *realtimeRuleChecker) CanReceiveRecord(collectionName, recordID string, 
 func (c *realtimeRuleChecker) collectionByName(name string) *collection.Collection {
 	now := time.Now()
 
+	// The TTL/expiry check must happen in the SAME critical section that reads
+	// the cache entry — checking freshness after releasing the lock would let a
+	// concurrent writer mutate the entry between the read and the check.
 	c.mu.Lock()
-	if entry, ok := c.cache[name]; ok && now.Sub(entry.fetchedAt) < collectionCacheTTL {
-		c.mu.Unlock()
+	entry, ok := c.cache[name]
+	fresh := ok && now.Sub(entry.fetchedAt) < collectionCacheTTL
+	c.mu.Unlock()
+	if fresh {
 		return entry.coll
 	}
-	c.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

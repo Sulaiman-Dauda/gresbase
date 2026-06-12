@@ -16,6 +16,7 @@ import (
 	"github.com/gresbase/gresbase/internal/forms"
 	"github.com/gresbase/gresbase/internal/query"
 	"github.com/gresbase/gresbase/internal/tools/search"
+	"github.com/rs/zerolog/log"
 )
 
 // ---------------------------------------------------------------------------
@@ -278,10 +279,13 @@ func (h *Handlers) RecordsUpdate(w http.ResponseWriter, r *http.Request) {
 	postCommitCtx := cloneRequestContext(r.Context(), false)
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 	database.AfterCommit(r.Context(), func() {
+		// Fire-and-forget lifecycle notification; the write already committed.
 		_ = h.app.OnRecordUpdate().Trigger(&events.RecordEvent{App: h.app, Record: record, CollectionID: coll.ID, CollectionName: coll.Name, RecordID: recordID, Type: events.ModelEventUpdate}, func(e events.Event) error { return e.Next() })
 		h.app.Realtime().BroadcastRecord("update", collName, recordID, record)
 		for _, path := range removedFilePaths {
-			_ = h.app.Storage().Delete(postCommitCtx, path)
+			if err := h.app.Storage().Delete(postCommitCtx, path); err != nil {
+				log.Warn().Err(err).Str("collection", collName).Str("record", recordID).Str("path", path).Msg("Failed to delete orphaned file after record update")
+			}
 		}
 		h.app.Auth().RecordAudit(postCommitCtx, adminID, "record.update", collName, recordID, map[string]any{"deleted_files": removedFilePaths}, r)
 	})
@@ -329,10 +333,13 @@ func (h *Handlers) RecordsDelete(w http.ResponseWriter, r *http.Request) {
 	postCommitCtx := cloneRequestContext(r.Context(), false)
 	adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 	database.AfterCommit(r.Context(), func() {
+		// Fire-and-forget lifecycle notification; the delete already committed.
 		_ = h.app.OnRecordDelete().Trigger(&events.RecordEvent{App: h.app, Record: deleted, CollectionID: coll.ID, CollectionName: coll.Name, RecordID: recordID, Type: events.ModelEventDelete}, func(e events.Event) error { return e.Next() })
 		h.app.Realtime().BroadcastRecord("delete", collName, recordID, deleted)
 		for _, path := range filePathsToDelete {
-			_ = h.app.Storage().Delete(postCommitCtx, path)
+			if err := h.app.Storage().Delete(postCommitCtx, path); err != nil {
+				log.Warn().Err(err).Str("collection", collName).Str("record", recordID).Str("path", path).Msg("Failed to delete file after record delete")
+			}
 		}
 		h.app.Auth().RecordAudit(postCommitCtx, adminID, "record.delete", collName, recordID, map[string]any{"deleted_files": filePathsToDelete}, r)
 	})

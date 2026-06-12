@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/gresbase/gresbase/internal/app"
 	"github.com/gresbase/gresbase/internal/auth"
 )
@@ -135,9 +136,10 @@ func SecurityHeaders(next http.Handler) http.Handler {
 // RequestIDMiddleware extracts or creates a request ID and sets the X-Request-ID header.
 func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := r.Header.Get("X-Request-ID")
+		requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
 		if requestID == "" {
-			requestID = "unknown"
+			// Always emit a real, traceable ID — never "unknown".
+			requestID = uuid.NewString()
 		}
 		w.Header().Set("X-Request-ID", requestID)
 		ctx := context.WithValue(r.Context(), CtxRequestID, requestID)

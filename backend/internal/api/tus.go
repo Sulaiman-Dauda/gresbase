@@ -367,7 +367,9 @@ func (t *tusController) preFinish(hook handler.HookEvent) (handler.HTTPResponse,
 	}, func(e events.Event) error { return e.Next() })
 	t.app.Realtime().BroadcastRecord("update", coll.Name, recordID, updated)
 	for _, path := range removedRecordFilePaths(coll, recordID, record, updated) {
-		_ = t.app.Storage().Delete(ctx, path)
+		if err := t.app.Storage().Delete(ctx, path); err != nil {
+			log.Warn().Err(err).Str("collection", coll.Name).Str("record", recordID).Str("path", path).Msg("Failed to delete replaced file after TUS upload")
+		}
 	}
 	t.app.Auth().RecordAudit(ctx, meta[tusMetaAuthAdminID], "file.tus_upload", coll.Name, recordID,
 		map[string]any{"path": fileInfo.Path, "filename": filename, "field": fieldName}, nil)

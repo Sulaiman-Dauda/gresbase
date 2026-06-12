@@ -90,6 +90,12 @@ func getBaseURL(r *http.Request) string {
 }
 
 func sanitizeAdmin(a *auth.AdminUser) map[string]any {
+	if a == nil {
+		// Defensive: never dereference a nil admin. Callers that pass nil
+		// (e.g. a lookup that returned no row) get an empty object rather
+		// than a panic.
+		return map[string]any{}
+	}
 	return map[string]any{
 		"id":            a.ID,
 		"email":         a.Email,

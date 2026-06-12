@@ -8,6 +8,7 @@ import (
 	"github.com/gresbase/gresbase/internal/database"
 	"github.com/gresbase/gresbase/internal/events"
 	"github.com/gresbase/gresbase/internal/forms"
+	"github.com/rs/zerolog/log"
 )
 
 // ---------------------------------------------------------------------------
@@ -162,8 +163,11 @@ func (h *Handlers) CollectionsDelete(w http.ResponseWriter, r *http.Request) {
 		adminID, _ := r.Context().Value(contextKeyAdminID).(string)
 		deletedPrefix := coll.Name + "/"
 		database.AfterCommit(r.Context(), func() {
+			// Fire-and-forget lifecycle notification; the delete already committed.
 			_ = h.app.OnCollectionDelete().Trigger(&events.CollectionEvent{App: h.app, CollectionID: coll.ID, CollectionName: coll.Name, Type: events.ModelEventDelete}, func(e events.Event) error { return e.Next() })
-			_ = h.app.Storage().DeletePrefix(postCommitCtx, deletedPrefix)
+			if err := h.app.Storage().DeletePrefix(postCommitCtx, deletedPrefix); err != nil {
+				log.Warn().Err(err).Str("collection", coll.Name).Str("prefix", deletedPrefix).Msg("Failed to delete collection storage after drop")
+			}
 			h.app.Auth().RecordAudit(postCommitCtx, adminID, "collection.delete", "_collections", coll.ID, map[string]any{"name": coll.Name, "deleted_storage_prefix": deletedPrefix}, r)
 		})
 	}

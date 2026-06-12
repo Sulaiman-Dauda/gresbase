@@ -12,6 +12,7 @@ import (
 	"github.com/gresbase/gresbase/internal/events"
 	"github.com/gresbase/gresbase/internal/forms"
 	"github.com/gresbase/gresbase/internal/storage"
+	"github.com/rs/zerolog/log"
 )
 
 // ---------------------------------------------------------------------------
@@ -220,8 +221,11 @@ func (h *Handlers) FileDelete(w http.ResponseWriter, r *http.Request) {
 		Path:           path,
 	}
 	if err := h.app.OnFileDeleteRequest().Trigger(event, func(e events.Event) error {
-		// Drop cached thumbnail variants alongside the original.
-		_ = h.app.Storage().DeleteThumbs(r.Context(), event.Path)
+		// Drop cached thumbnail variants alongside the original. Best-effort:
+		// a stale thumbnail is harmless, so log rather than fail the delete.
+		if err := h.app.Storage().DeleteThumbs(r.Context(), event.Path); err != nil {
+			log.Warn().Err(err).Str("path", event.Path).Msg("Failed to delete cached thumbnails")
+		}
 		return h.app.Storage().Delete(r.Context(), event.Path)
 	}); err != nil {
 		writeInternalError(w, "Delete failed", err)

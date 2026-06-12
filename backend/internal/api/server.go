@@ -53,6 +53,9 @@ func NewServer(application *app.App) *Server {
 	// Global middleware
 	r.Use(middleware.RequestID)
 	r.Use(apimw.RealIP(trustedProxies))
+	if application != nil {
+		r.Use(apimw.HTTPMetrics(application.Metrics()))
+	}
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(apimw.TimeoutExcept(60*time.Second, apimw.IsLongLivedRequest))
@@ -517,13 +520,21 @@ func (s *Server) Start(addr string) error {
 	return s.srv.Serve(listener)
 }
 
-// Shutdown gracefully closes the server.
+// Shutdown gracefully closes the server, draining in-flight requests within a
+// bounded timeout before forcing a close.
 func (s *Server) Shutdown() error {
 	if s.tusJanitorStop != nil {
 		close(s.tusJanitorStop)
 		s.tusJanitorStop = nil
 	}
-	if s.srv != nil {
+	if s.srv == nil {
+		return nil
+	}
+	// Drain in-flight requests with a bounded deadline; fall back to an abrupt
+	// Close() if the graceful shutdown does not complete in time.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := s.srv.Shutdown(ctx); err != nil {
 		return s.srv.Close()
 	}
 	return nil
