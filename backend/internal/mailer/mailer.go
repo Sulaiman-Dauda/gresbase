@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/mail"
 	"net/smtp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -193,7 +194,7 @@ type SMTPSender struct {
 }
 
 func (s *SMTPSender) Send(msg *Message) error {
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	addr := net.JoinHostPort(s.host, strconv.Itoa(s.port))
 	from := msg.From.Address
 	to := make([]string, len(msg.To))
 	for i, a := range msg.To {

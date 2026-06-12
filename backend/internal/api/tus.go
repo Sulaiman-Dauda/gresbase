@@ -347,13 +347,16 @@ func (t *tusController) preFinish(hook handler.HookEvent) (handler.HTTPResponse,
 	}
 
 	patch := map[string]any{field.Name: newValue}
-	if err := t.app.Collections().ValidateRecordPatch(coll, patch); err == nil {
-		err = t.app.Collections().UpdateRecord(ctx, coll, recordID, patch)
+	attachErr := t.app.Collections().ValidateRecordPatch(coll, patch)
+	if attachErr == nil {
+		attachErr = t.app.Collections().UpdateRecord(ctx, coll, recordID, patch)
 	}
-	if err != nil {
+	if attachErr != nil {
 		// Roll back the stored file so a failed attach leaves no orphan.
-		_ = t.app.Storage().Delete(ctx, fileInfo.Path)
-		return fail("ERR_ATTACH_FAILED", "failed to update record: "+err.Error(), http.StatusBadRequest)
+		if delErr := t.app.Storage().Delete(ctx, fileInfo.Path); delErr != nil {
+			log.Error().Err(delErr).Str("path", fileInfo.Path).Msg("tus: failed to roll back orphaned upload")
+		}
+		return fail("ERR_ATTACH_FAILED", "failed to update record: "+attachErr.Error(), http.StatusBadRequest)
 	}
 
 	updated, _ := t.app.Collections().GetRecord(ctx, coll, recordID)
