@@ -157,6 +157,26 @@ export interface AggregateResponse {
   items: Record<string, any>[]
 }
 
+export interface VectorSearchOptions {
+  /** Name of the `vector` field to search against. */
+  field: string
+  /** The query embedding. Must match the field's configured dimensions. */
+  vector: number[]
+  /** Max results to return (default 20, max 200). */
+  limit?: number
+  /**
+   * Distance metric override. Defaults to the field's configured metric.
+   * `cosine` (angle), `l2` (Euclidean), or `inner` (negative inner product).
+   */
+  distance?: 'cosine' | 'l2' | 'inner'
+}
+
+export interface VectorSearchResponse<T = RecordData> {
+  /** Matching records, nearest first. Each carries a numeric `_distance`. */
+  items: (T & { _distance: number })[]
+  totalItems: number
+}
+
 export interface ChannelMessage {
   event: string
   data: any
@@ -1134,6 +1154,30 @@ class CollectionService<T extends RecordData = RecordData> {
     if (options.limit !== undefined) query.limit = String(options.limit)
 
     return this.http.request<AggregateResponse>('GET', `/api/v1/records/${this.collectionName}/aggregate?${new URLSearchParams(query)}`)
+  }
+
+  /**
+   * Similarity search over a `vector` field (pgvector). Returns the records
+   * nearest to the query embedding, each annotated with a numeric `_distance`
+   * (smaller = closer). The collection list rule is enforced, so results never
+   * include rows the caller may not read.
+   *
+   * @example
+   * const { items } = await pb.collection('docs').searchVector({
+   *   field: 'embedding',
+   *   vector: await embed('how do I reset my password?'),
+   *   limit: 5,
+   * })
+   */
+  async searchVector(options: VectorSearchOptions): Promise<VectorSearchResponse<T>> {
+    const body: Record<string, unknown> = {
+      field: options.field,
+      vector: options.vector,
+    }
+    if (options.limit !== undefined) body.limit = options.limit
+    if (options.distance) body.distance = options.distance
+
+    return this.http.request<VectorSearchResponse<T>>('POST', `/api/v1/records/${this.collectionName}/search-vector`, body)
   }
 
   // ---- Record Auth (for auth collections) ----

@@ -191,6 +191,48 @@ describe('CollectionService.aggregate', () => {
   })
 })
 
+describe('CollectionService.searchVector', () => {
+  it('should POST the field/vector/limit/distance payload to search-vector', async () => {
+    const fetchMock = createFetchMock({ items: [], totalItems: 0 })
+    const pb = new GresbaseClient({ url: 'http://localhost:8080', fetch: fetchMock })
+
+    await pb.collection('docs').searchVector({
+      field: 'embedding',
+      vector: [0.1, 0.2, 0.3],
+      limit: 5,
+      distance: 'cosine',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = (fetchMock as any).mock.calls[0]
+    expect(init.method).toBe('POST')
+    expect(new URL(url).pathname).toBe('/api/v1/records/docs/search-vector')
+    const sent = JSON.parse(init.body)
+    expect(sent).toEqual({ field: 'embedding', vector: [0.1, 0.2, 0.3], limit: 5, distance: 'cosine' })
+  })
+
+  it('should omit optional limit/distance when not provided', async () => {
+    const fetchMock = createFetchMock({ items: [], totalItems: 0 })
+    const pb = new GresbaseClient({ url: 'http://localhost:8080', fetch: fetchMock })
+
+    await pb.collection('docs').searchVector({ field: 'embedding', vector: [1, 2] })
+
+    const [, init] = (fetchMock as any).mock.calls[0]
+    const sent = JSON.parse(init.body)
+    expect(sent).toEqual({ field: 'embedding', vector: [1, 2] })
+  })
+
+  it('should return the items payload with _distance', async () => {
+    const items = [{ id: 'a', _distance: 0.04 }]
+    const fetchMock = createFetchMock({ items, totalItems: 1 })
+    const pb = new GresbaseClient({ url: 'http://localhost:8080', fetch: fetchMock })
+
+    const result = await pb.collection('docs').searchVector({ field: 'embedding', vector: [1, 2] })
+    expect(result.items).toEqual(items)
+    expect(result.totalItems).toBe(1)
+  })
+})
+
 describe('CollectionService record auth', () => {
   it('should expose all record auth methods', () => {
     const pb = new GresbaseClient({ url: 'http://localhost:8080' })

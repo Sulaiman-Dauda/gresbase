@@ -460,6 +460,57 @@ void main() {
     });
   });
 
+  group('searchVector', () {
+    test('POSTs the field/vector/limit/distance payload', () async {
+      final log = <CapturedRequest>[];
+      final client = mockedClient(
+        log,
+        (req) => jsonResponse({
+          'items': [
+            {'id': 'a', '_distance': 0.04}
+          ],
+          'totalItems': 1,
+        }),
+      );
+
+      final res = await client.collection('docs').searchVector(
+        field: 'embedding',
+        vector: [0.1, 0.2, 0.3],
+        limit: 5,
+        distance: 'cosine',
+      );
+
+      final req = log.single;
+      expect(req.method, 'POST');
+      expect(req.uri.path, '/api/v1/records/docs/search-vector');
+      expect(req.jsonBody, {
+        'field': 'embedding',
+        'vector': [0.1, 0.2, 0.3],
+        'limit': 5,
+        'distance': 'cosine',
+      });
+      expect(res.totalItems, 1);
+      expect(res.items.single['_distance'], 0.04);
+    });
+
+    test('omits optional limit/distance when not provided', () async {
+      final log = <CapturedRequest>[];
+      final client = mockedClient(
+        log,
+        (req) => jsonResponse({'items': [], 'totalItems': 0}),
+      );
+
+      await client
+          .collection('docs')
+          .searchVector(field: 'embedding', vector: [1.0, 2.0]);
+
+      expect(log.single.jsonBody, {
+        'field': 'embedding',
+        'vector': [1.0, 2.0],
+      });
+    });
+  });
+
   group('files', () {
     test('getUrl builds plain and decorated URLs', () {
       final client = mockedClient([], (req) => jsonResponse({}));

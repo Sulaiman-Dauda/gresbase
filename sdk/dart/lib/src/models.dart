@@ -285,6 +285,28 @@ class AggregateResponse {
       );
 }
 
+/// Result of a pgvector similarity search
+/// (`POST /api/v1/records/{collection}/search-vector`).
+class VectorSearchResponse {
+  /// Matching records, nearest first. Each map carries a numeric `_distance`
+  /// (smaller = closer to the query embedding).
+  final List<RecordData> items;
+
+  /// Number of records returned.
+  final int totalItems;
+
+  VectorSearchResponse({required this.items, required this.totalItems});
+
+  factory VectorSearchResponse.fromJson(Map<String, dynamic> json) =>
+      VectorSearchResponse(
+        items: (json['items'] as List<dynamic>?)
+                ?.map((e) => e as Map<String, dynamic>)
+                .toList() ??
+            [],
+        totalItems: (json['totalItems'] as num?)?.toInt() ?? 0,
+      );
+}
+
 /// Result of a per-collection batch operation
 /// (`POST /api/v1/batch/{collection}`).
 class BatchResult {

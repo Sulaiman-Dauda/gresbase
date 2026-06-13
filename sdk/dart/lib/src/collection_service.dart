@@ -219,6 +219,40 @@ class CollectionService {
     return AggregateResponse.fromJson(result as Map<String, dynamic>);
   }
 
+  /// Similarity search over a `vector` field (pgvector). Returns the records
+  /// nearest to [vector], each annotated with a numeric `_distance` (smaller =
+  /// closer). The collection list rule is enforced, so results never include
+  /// rows the caller may not read.
+  ///
+  /// [field] is the `vector` field name; [vector] must match its configured
+  /// dimensions. [limit] defaults to 20 (max 200). [distance] overrides the
+  /// field's configured metric (`cosine`, `l2`, or `inner`).
+  ///
+  /// ```dart
+  /// final res = await client.collection('docs').searchVector(
+  ///   field: 'embedding',
+  ///   vector: await embed('how do I reset my password?'),
+  ///   limit: 5,
+  /// );
+  /// // res.items: [{id: '...', _distance: 0.04, ...}, ...]
+  /// ```
+  Future<VectorSearchResponse> searchVector({
+    required String field,
+    required List<double> vector,
+    int? limit,
+    String? distance,
+  }) async {
+    final body = <String, dynamic>{
+      'field': field,
+      'vector': vector,
+      if (limit != null) 'limit': limit,
+      if (distance != null) 'distance': distance,
+    };
+    final result =
+        await _http.send('POST', '$_basePath/search-vector', body: body);
+    return VectorSearchResponse.fromJson(result as Map<String, dynamic>);
+  }
+
   // ---- Record Auth (for auth collections) ----
 
   /// Authenticate a collection record with identity (email/username) and
