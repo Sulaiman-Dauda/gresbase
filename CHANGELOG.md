@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Vector similarity search in the SDKs** — `collection.searchVector({ field,
+  vector, limit, distance })` in the TypeScript and Dart SDKs, wrapping the
+  rule-enforced `POST /records/{collection}/search-vector` endpoint for
+  pgvector-backed semantic search and RAG. Results carry `_distance`.
+- **Superuser IP allowlist** (`SUPERUSER_IPS`) — optionally restrict the
+  admin/dashboard API to specific IPs/CIDRs. Empty by default (no lockout);
+  matches the resolved client IP; end-user record auth is unaffected.
+- **Rate-limit exclusions** (`RATE_LIMIT_EXCLUDE_IPS`) — exempt trusted
+  IPs/CIDRs (internal services, uptime probes, CI) from auth-endpoint rate
+  limiting. CIDR-aware.
+
 ## [1.0.0] - 2026-06-12
 
 First stable release. Gresbase is a single-binary, self-hosted backend platform

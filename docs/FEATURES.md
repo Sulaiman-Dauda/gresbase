@@ -25,6 +25,9 @@ PostgreSQL. No extra services, gateways, or sidecars.
 - [Embedding Gresbase as a Go framework](#embedding-gresbase-as-a-go-framework)
 - [Self-update](#self-update)
 - [Operational hardening](#operational-hardening)
+- [Locking down the admin/dashboard (superuser IP allowlist)](#locking-down-the-admindashboard-superuser-ip-allowlist)
+- [Rate limiting & exclusions](#rate-limiting--exclusions)
+- [Connection pooling](#connection-pooling)
 - [TLS](#tls)
 
 ---
@@ -248,17 +251,55 @@ Define a vector field (dashboard schema editor, or via the API):
 - `distance` — `cosine` (default), `l2`, or `inner`.
 - `index` — `hnsw` (default, falls back to `ivfflat` on older pgvector), or `none`.
 
-Store records with the embedding as a number array, then search:
+Store a record with the embedding as a plain number array — the same as any
+other field:
+
+```bash
+curl -X POST $API/records/documents \
+  -d '{ "title": "Reset your password", "embedding": [0.01, -0.2, 0.37, ...] }'
+```
+
+Then run a similarity search. Pass a query embedding and get back the nearest
+records, each annotated with a numeric `_distance` (smaller = closer):
 
 ```bash
 curl -X POST $API/records/documents/search-vector \
   -d '{ "field": "embedding", "vector": [0.01, -0.2, ...], "limit": 10 }'
-# → { "items": [ { "id": "...", "title": "...", "_distance": 0.0123 }, ... ] }
+# → { "items": [ { "id": "...", "title": "...", "_distance": 0.0123 }, ... ], "totalItems": 10 }
+```
+
+From the **TypeScript SDK**:
+
+```ts
+const { items } = await pb.collection('documents').searchVector({
+  field: 'embedding',
+  vector: await embed('how do I reset my password?'), // your model call
+  limit: 5,
+})
+for (const doc of items) console.log(doc.title, doc._distance)
+```
+
+From the **Dart SDK**:
+
+```dart
+final res = await client.collection('documents').searchVector(
+  field: 'embedding',
+  vector: await embed('how do I reset my password?'),
+  limit: 5,
+);
+for (final doc in res.items) print('${doc['title']} ${doc['_distance']}');
 ```
 
 Results are ordered by similarity, annotated with `_distance`, and **respect the
 collection's list rule** — a similarity search never returns rows the caller may
-not see.
+not see. You can override the field's configured metric per query by passing
+`"distance": "cosine" | "l2" | "inner"`.
+
+**Retrieval-augmented generation (RAG)** is then three steps: embed the user's
+question with your model, `searchVector` to fetch the top-k relevant records, and
+pass their text to the model as context. No separate vector database, no sync
+pipeline — your embeddings live next to the rest of your data and are protected
+by the same access rules.
 
 **Availability:** vector fields require the `vector` extension. Most managed
 PostgreSQL providers ship it (Neon, RDS/Aurora with pgvector, the
@@ -652,6 +693,75 @@ Small things that decide whether self-hosting is calm or terrifying:
   directories run PostgreSQL 17; existing directories keep the major version
   recorded in their `PG_VERSION` file (never auto-upgraded across majors), and
   unrecognized clusters fail closed instead of risking data.
+- **Superuser IP allowlist** — optionally restrict the admin/dashboard API to
+  known IPs/CIDRs (see below).
+- **Rate-limit exclusions** — exempt trusted networks and uptime probes from
+  auth rate limiting (see below).
+
+---
+
+## Locking down the admin/dashboard (superuser IP allowlist)
+
+By default the admin API is reachable from anywhere (anyone still needs valid
+credentials). Once your operators connect from stable addresses — an office
+egress IP, a VPN range, a bastion host — you can require that **every
+authenticated admin-console request** (roles `viewer`/`editor`/`admin`/
+`super_admin`) originate from an allowlisted IP or CIDR:
+
+```bash
+# single IP, a CIDR range, IPv6 — comma-separated
+SUPERUSER_IPS="203.0.113.7,10.8.0.0/24,2001:db8::/32"
+```
+
+or in `gresbase.yaml`:
+
+```yaml
+superuser_ips:
+  - 203.0.113.7
+  - 10.8.0.0/24
+```
+
+- **Empty is the default and never locks anyone out** — leave it unset to allow
+  admin access from anywhere.
+- Matching uses the **resolved** client IP, so set `trusted_proxies` correctly
+  when running behind a reverse proxy (otherwise the proxy's IP is what's
+  checked). A non-allowlisted admin request is rejected with `403`.
+- **End-user record auth is never affected** — this only gates the admin/
+  dashboard surface, not your app's users.
+- Locked yourself out? Update `SUPERUSER_IPS` (or remove it) and restart.
+
+## Rate limiting & exclusions
+
+Authentication endpoints (admin login/register/OTP and record auth) are rate
+limited per client IP to blunt brute-force and credential-stuffing attacks.
+Trusted sources — an internal service, a health-check probe, your CI — can be
+exempted entirely so legitimate automated traffic is never throttled:
+
+```bash
+RATE_LIMIT_EXCLUDE_IPS="10.0.0.0/8,127.0.0.1,198.51.100.42"
+```
+
+Matching is CIDR-aware and uses the resolved client IP (same
+`trusted_proxies` caveat as above). Excluded requests skip the limiter window
+completely rather than just getting a larger quota.
+
+## Connection pooling
+
+Gresbase pools PostgreSQL connections **in-process** (via `pgx`) — there is no
+separate pooler service to deploy or babysit. Size the pool to your database and
+workload:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DATABASE_MAX_OPEN_CONNS` | `25` | Maximum open connections in the pool |
+| `DATABASE_MAX_IDLE_CONNS` | `5` | Connections kept warm when idle |
+| `DATABASE_MAX_IDLE_TIME` | `5m` | How long an idle connection is retained |
+
+When a read replica is configured (`DATABASE_REPLICA_URL`), it gets its own pool
+with the same sizing, and replica-safe reads (record lists, aggregations,
+relation expansion) are routed to it while writes stay on the primary. See
+[Scaling out](#scaling-out-multi-node-realtime-with-listennotify) and
+`DEPLOYMENT.md` for the full multi-node picture.
 
 ---
 

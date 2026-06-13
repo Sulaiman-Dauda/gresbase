@@ -104,6 +104,14 @@ migrations_dir: "./gb_migrations"
 rate_limit_enabled: true
 rate_limit_rps: 100
 rate_limit_burst: 200
+# IPs / CIDRs exempt from rate limiting (trusted networks, uptime probes, CI).
+# rate_limit_exclude_ips: "10.0.0.0/8,127.0.0.1"
+
+# ---- Admin/dashboard access ----
+# Restrict the admin API to these IPs/CIDRs. Empty (default) = allow anywhere
+# (credentials still required). Uses the resolved client IP, so set
+# trusted_proxies correctly when behind a reverse proxy.
+# superuser_ips: "203.0.113.7,10.8.0.0/24"
 
 # ---- Observability ----
 metrics_enabled: true

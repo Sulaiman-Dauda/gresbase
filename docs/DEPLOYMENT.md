@@ -324,7 +324,11 @@ volume), or rely on S3 versioning when using the `s3` backend.
       internet directly.
 - [ ] **Proxy overwrites `X-Forwarded-For` / `X-Real-IP`** so client IPs (used
       for rate limiting and audit logs) cannot be spoofed.
-- [ ] **Rate limiting on** (`RATE_LIMIT_ENABLED=true`, the default).
+- [ ] **Rate limiting on** (`RATE_LIMIT_ENABLED=true`, the default). Exempt
+      trusted probes/CI with `RATE_LIMIT_EXCLUDE_IPS` if needed.
+- [ ] **Admin surface locked to known IPs** with `SUPERUSER_IPS` once your
+      operator addresses are stable (optional but recommended; requires correct
+      `TRUSTED_PROXIES` behind a proxy).
 - [ ] **`DEV_MODE` is off** in production (it relaxes auth/validation).
 - [ ] **`/metrics` protected** with `METRICS_TOKEN` if reachable beyond a
       trusted network.
@@ -379,6 +383,8 @@ Names below are the actual env bindings from
 | `RATE_LIMIT_ENABLED`      | No              | `true`       | Enable rate limiting.                                        |
 | `RATE_LIMIT_RPS`          | No              | `100`        | Requests/sec.                                                |
 | `RATE_LIMIT_BURST`        | No              | `200`        | Burst size.                                                  |
+| `RATE_LIMIT_EXCLUDE_IPS`  | No              | (none)       | Comma-separated IPs/CIDRs exempt from rate limiting.        |
+| `SUPERUSER_IPS`           | No              | (none)       | Comma-separated IPs/CIDRs allowed to use the admin/dashboard API (empty = anywhere). |
 | `METRICS_ENABLED`         | No              | `true`       | Expose `/metrics`.                                           |
 | `METRICS_TOKEN`           | No              | —            | Bearer token gating `/metrics` (empty = open).               |
 | `REALTIME_MULTI_NODE`     | No              | `false`      | Cross-node realtime via LISTEN/NOTIFY.                       |
