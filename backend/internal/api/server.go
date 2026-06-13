@@ -13,7 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"github.com/go-chi/httprate"
 	apimw "github.com/gresbase/gresbase/internal/api/middleware"
 	"github.com/gresbase/gresbase/internal/app"
 	"github.com/gresbase/gresbase/internal/buildinfo"
@@ -207,11 +206,11 @@ func (s *Server) mountRoutes() {
 
 		// Auth
 		r.Route("/auth", func(r chi.Router) {
-			r.With(httprate.LimitByIP(10, time.Minute)).Post("/login", h.Login)
-			r.With(httprate.LimitByIP(5, time.Minute)).Post("/register", h.Register)
+			r.With(mw.RateLimitByIP(10, time.Minute)).Post("/login", h.Login)
+			r.With(mw.RateLimitByIP(5, time.Minute)).Post("/register", h.Register)
 			r.Post("/refresh", h.RefreshToken)
 			r.With(mw.RequireAuth).Post("/logout", h.Logout)
-			r.With(httprate.LimitByIP(5, time.Minute)).Post("/otp/request", h.OTPRequest)
+			r.With(mw.RateLimitByIP(5, time.Minute)).Post("/otp/request", h.OTPRequest)
 			r.Post("/otp/verify", h.OTPVerify)
 			r.Post("/magic-link", h.MagicLink)
 			r.Post("/magic-link/verify", h.MagicLinkVerify)
@@ -274,7 +273,7 @@ func (s *Server) mountRoutes() {
 		})
 
 		// Record Auth — end-user authentication for auth collections
-		authRate := httprate.LimitByIP(10, time.Minute)
+		authRate := mw.RateLimitByIP(10, time.Minute)
 		r.Get("/collections/{collection}/auth-methods", h.RecordAuthMethods)
 		r.Route("/collections/{collection}/auth", func(r chi.Router) {
 			// Password auth
@@ -429,7 +428,7 @@ func (s *Server) mountRoutes() {
 		})
 
 		r.Get("/collections/{collection}/auth-methods", h.RecordAuthMethods)
-		pbAuthRate := httprate.LimitByIP(10, time.Minute)
+		pbAuthRate := mw.RateLimitByIP(10, time.Minute)
 		r.Route("/collections/{collection}", func(r chi.Router) {
 			r.With(pbAuthRate).Post("/auth-with-password", h.RecordAuthPassword)
 			r.With(pbAuthRate).Post("/auth-with-otp", h.RecordAuthOTPVerify)

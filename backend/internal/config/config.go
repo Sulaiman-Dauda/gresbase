@@ -143,6 +143,21 @@ type Config struct {
 	RateLimitEnabled bool `mapstructure:"rate_limit_enabled"`
 	RateLimitRPS     int  `mapstructure:"rate_limit_rps"`
 	RateLimitBurst   int  `mapstructure:"rate_limit_burst"`
+	// RateLimitExcludeIPs lists IPs / CIDR ranges that are exempt from endpoint
+	// rate limiting (e.g. a trusted internal network, an uptime probe, or your
+	// office egress IP). Matching is CIDR-aware and uses the resolved client IP,
+	// so configure TrustedProxies correctly when running behind a reverse proxy.
+	RateLimitExcludeIPs []string `mapstructure:"rate_limit_exclude_ips"`
+
+	// SuperuserIPs, when non-empty, restricts the admin / dashboard API — every
+	// authenticated admin-console role (viewer/editor/admin/super_admin) — to
+	// requests originating from these IPs or CIDR ranges. Empty (the default)
+	// allows admin access from anywhere; set it once your admin IPs are stable
+	// to lock down the control plane. Matching uses the resolved client IP, so
+	// set TrustedProxies correctly when behind a reverse proxy. End-user record
+	// auth is never affected. A wrong value can lock you out of the dashboard —
+	// fix it via SUPERUSER_IPS / config and restart to recover.
+	SuperuserIPs []string `mapstructure:"superuser_ips"`
 
 	// Observability — Prometheus text endpoint at /metrics. A static bearer
 	// token gates scrapes when set; empty token means open (node_exporter
@@ -308,6 +323,8 @@ func Load() *Config {
 	bindEnv("rate_limit_enabled", "RATE_LIMIT_ENABLED")
 	bindEnv("rate_limit_rps", "RATE_LIMIT_RPS")
 	bindEnv("rate_limit_burst", "RATE_LIMIT_BURST")
+	bindEnv("rate_limit_exclude_ips", "RATE_LIMIT_EXCLUDE_IPS")
+	bindEnv("superuser_ips", "SUPERUSER_IPS")
 	bindEnv("metrics_enabled", "METRICS_ENABLED")
 	bindEnv("metrics_token", "METRICS_TOKEN")
 	bindEnv("backup_cron", "BACKUP_CRON")
@@ -331,6 +348,12 @@ func Load() *Config {
 	}
 	if proxies := os.Getenv("TRUSTED_PROXIES"); proxies != "" {
 		cfg.TrustedProxies = splitCSV(proxies)
+	}
+	if ips := os.Getenv("RATE_LIMIT_EXCLUDE_IPS"); ips != "" {
+		cfg.RateLimitExcludeIPs = splitCSV(ips)
+	}
+	if ips := os.Getenv("SUPERUSER_IPS"); ips != "" {
+		cfg.SuperuserIPs = splitCSV(ips)
 	}
 	if cfg.MaxRequestBodyBytes <= 0 {
 		cfg.MaxRequestBodyBytes = 10 << 20

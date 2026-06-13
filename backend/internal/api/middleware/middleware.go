@@ -11,6 +11,7 @@ import (
 	"github.com/gresbase/gresbase/internal/app"
 	"github.com/gresbase/gresbase/internal/auth"
 	"github.com/gresbase/gresbase/internal/ctxkeys"
+	"github.com/gresbase/gresbase/internal/netutil"
 )
 
 // CSRFCookieName is the readable (non-HttpOnly) double-submit CSRF cookie.
@@ -158,8 +159,30 @@ func (mw *Middleware) RequireAuth(next http.Handler) http.Handler {
 			writeAuthError(w, http.StatusUnauthorized, "Missing or invalid authorization")
 			return
 		}
+		// Superuser IP allowlist: once an admin principal is authenticated,
+		// optionally require the request to originate from a trusted IP/CIDR.
+		if !mw.superuserIPAllowed(r) {
+			writeAuthError(w, http.StatusForbidden, "Admin access is not allowed from this IP address")
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// superuserIPAllowed reports whether the request's resolved client IP may use
+// the admin / dashboard API. When no allowlist is configured it always returns
+// true — an empty list can never lock anyone out (fail-open by design). The
+// client IP is taken from r.RemoteAddr, which RealIP has already resolved in a
+// trusted-proxy-aware way.
+func (mw *Middleware) superuserIPAllowed(r *http.Request) bool {
+	if mw.app == nil || mw.app.Config() == nil {
+		return true
+	}
+	allow := mw.app.Config().SuperuserIPs
+	if len(allow) == 0 {
+		return true
+	}
+	return netutil.IPInCIDRs(netutil.HostOnly(r.RemoteAddr), allow)
 }
 
 // RequireMinRole ensures that the authenticated admin role satisfies the
