@@ -38,7 +38,7 @@ RUN npm run build
 FROM golang:1.25@sha256:379065f16fe8cce7949001ba9cffc827cd4b93d69495dec405befd1c13e19bb3 AS backend-builder
 
 # Version stamp — keep in sync with the Makefile LDFLAGS.
-ARG VERSION=0.3.0
+ARG VERSION=1.0.0
 ARG BUILD_TIME
 ARG GIT_COMMIT=unknown
 # Provided automatically by buildkit; declared so it's usable in RUN and so
@@ -71,9 +71,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build \
       -trimpath \
       -ldflags "-s -w \
-        -X 'github.com/gresbase/gresbase.Version=${VERSION}' \
-        -X 'github.com/gresbase/gresbase.BuildTime=${BUILD_TIME}' \
-        -X 'github.com/gresbase/gresbase.GitCommit=${GIT_COMMIT}'" \
+        -X 'github.com/gresbase/gresbase/internal/buildinfo.Version=${VERSION}' \
+        -X 'github.com/gresbase/gresbase/internal/buildinfo.BuildTime=${BUILD_TIME}' \
+        -X 'github.com/gresbase/gresbase/internal/buildinfo.GitCommit=${GIT_COMMIT}'" \
       -o /out/gresbase ./cmd/gresbase
 
 # ──────────────────────────────────────────────────────────────────────────
