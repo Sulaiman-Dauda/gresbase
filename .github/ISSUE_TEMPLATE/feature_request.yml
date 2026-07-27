@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest something Gresbase should do
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Gresbase makes hard or impossible?
+    validations: { required: true }
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: Optional. The problem matters more than the proposed solution.
+
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Architectural fit
+      description: >
+        Gresbase has a few non-negotiable rules (see CONTRIBUTING.md). Ideas that
+        break them are unlikely to land, however useful.
+      options:
+        - label: This keeps PostgreSQL as the only infrastructure
+        - label: This does not weaken the locked-by-default access model

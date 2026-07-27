@@ -1,0 +1,48 @@
+name: Bug report
+description: Something does not work as documented
+labels: ["type: bug", "status: needs repro"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not report security vulnerabilities here.** Use
+        [Security → Report a vulnerability](../../security/advisories/new) so it stays private.
+
+        Access-rule problems in particular are usually security issues: collections are
+        locked on creation, so unexpected *access* is more serious than unexpected denial.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what actually happened.
+    validations: { required: true }
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Collection schema and access rules matter — include them where relevant.
+    validations: { required: true }
+
+  - type: input
+    id: version
+    attributes:
+      label: Gresbase version
+    validations: { required: true }
+
+  - type: dropdown
+    id: postgres
+    attributes:
+      label: PostgreSQL
+      options:
+        - Embedded (single binary)
+        - External PostgreSQL
+    validations: { required: true }
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact secrets and tokens.
+      render: shell

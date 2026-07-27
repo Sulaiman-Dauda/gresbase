@@ -66,3 +66,15 @@ backend/gresbase_*
 # Temp
 tmp/
 temp/
+
+# Dart / Flutter SDK build cache — a 24MB snapshot was committed here once
+.dart_tool/
+.packages
+.pub-cache/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
