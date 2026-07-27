@@ -1,10 +1,19 @@
-# golangci-lint v1 configuration for Gresbase backend.
+# golangci-lint v2 configuration for the Gresbase backend.
+#
+# Migrated from the v1 schema because v1 is end-of-life and its binaries are
+# built with go1.24, which refuses a `go 1.25` module outright:
+#   can't load config: the Go language version (go1.24) used to build
+#   golangci-lint is lower than the targeted Go version (1.25)
+#
+# Same linters and exclusions as before — only the schema changed.
+version: "2"
+
 run:
   timeout: 5m
   tests: true
 
 linters:
-  disable-all: true
+  default: none
   enable:
     # default set
     - errcheck
@@ -22,37 +31,38 @@ linters:
     - rowserrcheck
     - sqlclosecheck
 
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    # ResponseWriter.Write and connection deadline setters are conventionally
-    # unchecked (nothing actionable on failure mid-response).
-    exclude-functions:
-      - (net/http.ResponseWriter).Write
-      - (*github.com/gorilla/websocket.Conn).SetReadDeadline
-      - (*github.com/gorilla/websocket.Conn).SetWriteDeadline
-  misspell:
-    # "Terminater" is the spelling used by the tus/tusd library API.
-    ignore-words:
-      - Terminater
-  gosec:
-    excludes:
-      - G104 # handled by errcheck
-      - G304 # file-path-from-variable: storage layer is path-sanitized and tested
+  settings:
+    errcheck:
+      check-type-assertions: true
+      # ResponseWriter.Write and connection deadline setters are conventionally
+      # unchecked (nothing actionable on failure mid-response).
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+        - (*github.com/gorilla/websocket.Conn).SetReadDeadline
+        - (*github.com/gorilla/websocket.Conn).SetWriteDeadline
+    misspell:
+      # "Terminater" is the spelling used by the tus/tusd library API.
+      ignore-rules:
+        - Terminater
+    gosec:
+      excludes:
+        - G104 # handled by errcheck
+        - G304 # file-path-from-variable: storage layer is path-sanitized and tested
+
+  exclusions:
+    rules:
+      # Test files: relax security/error-noise that doesn't matter in tests.
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - bodyclose
+      # SQL identifiers in this codebase are quoted via QuoteIdent; gosec's
+      # string-formatted-query heuristic (G201/G202) produces false positives.
+      - linters:
+          - gosec
+        text: 'G20[12]'
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    # Test files: relax security/error-noise that doesn't matter in tests.
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
-        - bodyclose
-        - contextcheck
-    # SQL identifiers in this codebase are quoted via QuoteIdent; gosec's
-    # string-formatted-query heuristic (G201/G202) produces false positives.
-    - linters:
-        - gosec
-      text: 'G20[12]'
