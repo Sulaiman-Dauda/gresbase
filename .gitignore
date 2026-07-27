@@ -52,6 +52,11 @@ backend/gb_hooks/
 # Embedded PostgreSQL data (single-binary mode)
 gresbase_data/
 backend/gresbase_data/
+# The embedded frontend. `dist/` above excludes the directory outright, and git
+# does not descend into an excluded directory — so re-include the directory
+# itself first, or the PLACEHOLDER negation below never applies and the backend
+# cannot build from a clean clone.
+!backend/internal/ui/dist/
 backend/internal/ui/dist/*
 !backend/internal/ui/dist/PLACEHOLDER
 

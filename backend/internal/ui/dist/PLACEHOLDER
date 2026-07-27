@@ -1,0 +1,9 @@
+This file exists so that `//go:embed all:dist` in ../ui.go has something to
+match on a clean checkout.
+
+Without it `go build` and `go vet` fail with:
+
+    pattern all:dist: no matching files found
+
+The real frontend is built into this directory by `make build` and is ignored by
+git. Do not delete this file.
