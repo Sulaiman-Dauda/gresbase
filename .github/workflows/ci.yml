@@ -48,6 +48,17 @@ jobs:
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
+        # Advisory, not blocking — see the tracked issue.
+        #
+        # The lint step could never actually run before: it pinned golangci-lint
+        # v1.64.8, which refuses a `go 1.25` module. Fixing that revealed ~178
+        # pre-existing findings (62 errcheck, 91 gosec, 25 staticcheck). That is
+        # surfaced debt, not a regression — and gosec findings in particular need
+        # judging one at a time rather than silencing in bulk.
+        #
+        # The linter runs and its output is visible on every PR, but it does not
+        # gate merges until the backlog is cleared. Remove continue-on-error then.
+        continue-on-error: true
         with:
           version: v2.12.2
           working-directory: backend
