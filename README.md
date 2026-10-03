@@ -1,53 +1,55 @@
 # Gresbase
 
-> A self-hosted backend platform — PostgreSQL-backed collections, authentication, realtime, and file storage in a single Go binary.
+> A self-hosted backend platform with PostgreSQL-backed collections, authentication, realtime, and file storage in a single Go binary.
 
-> **Status: 1.0 — production-ready core.**
+> **Status 1.0, production-ready core.**
 > The core (auth, collections, records, locked-by-default rules, realtime, dashboard, file storage) is production-ready and secure by default.
 > Embedded single-binary PostgreSQL is intended for development and small deployments; run an external PostgreSQL in production.
 > See [Status](#project-status) for an honest assessment.
 
 ## Secure by default
 
-- **Collections are locked on creation** — every access rule starts as `null` (superusers only). You explicitly open what should be public.
+- **Collections are locked on creation**. Every access rule starts as `null` (superusers only). You explicitly open what should be public.
 - Access rules are enforced on **every read path**: list, view, search, batch, file downloads, and realtime event delivery.
 - Production refuses to start with a missing, generated, or weak `JWT_SECRET`.
 - Auth endpoints (admin and end-user) are rate limited by IP.
 - Dashboard auth uses httpOnly cookies with CSRF protection.
 
-## Postgres-native superpowers — one process, one database
+![Screen recording: a new collection is locked, an anonymous request to its list endpoint returns 403 Access denied, then after the list rule is set to Public the same request returns the records](docs/media/locked-by-default.gif)
+
+## Postgres-native superpowers: one process, one database
 
 The governing principle: **PostgreSQL is the only infrastructure.** Anything a
 larger platform does with a sidecar service, Gresbase does with a Postgres feature.
 
-- **Vector search (pgvector)** — add a `vector` field, store embeddings, run rule-aware similarity search. The AI/RAG use-case SQLite-based tools can't reach. → `POST /api/v1/records/{c}/search-vector`
-- **RLS-grade rules without the footguns** — locked-by-default app-layer rules with a preset catalog and a **rule simulator** ("would user X pass this rule against this record?") so policies are testable before they ship.
-- **Real Postgres RLS, generated** — compile your collection rules into `CREATE POLICY` statements for a restricted role, so direct database connections are guarded too. → `GET /api/v1/rls/script`, `POST /api/v1/rls/apply`
-- **Webhooks without pg_net** — HMAC-SHA256-signed event forwarding (Stripe-style `t=,v1=` signatures) with retries and a delivery log, delivered by in-process workers. → `/api/v1/webhooks`
-- **SQL console + schema introspection** — superuser SQL editor (read-only by default) and a structured schema API, all in-process. No separate database-metadata service to run. → `POST /api/v1/sql`, `GET /api/v1/sql/schema`
-- **Typed SDK from your schema** — `gresbase types` or `GET /api/v1/types.ts` generates a typed TypeScript client straight from your live schema. No code-generation service to run.
-- **Horizontal realtime** — set `realtime_multi_node: true` and record events travel between app nodes over Postgres `LISTEN/NOTIFY`. No Redis, no broker.
-- **Prometheus metrics in-process** — `GET /metrics` text exposition, optional bearer token. No log-shipping sidecars.
-- **REST aggregations** — `count`, `sum`, `avg`, `min`, `max` with `groupBy`, filtered and **list-rule enforced**, computed in SQL so you never ship rows to the client just to count them. → `GET /api/v1/records/{c}/aggregate?aggregate=count,sum:amount&groupBy=status`
-- **Rule-enforced relation expansion** — forward (`?expand=author`), back-relations (`?expand=comments_via_post`), and nested paths (`comments_via_post.user`, up to 6 levels). Every level honors the target collection's rules, so a public collection can never leak a locked one through expand.
-- **Anonymous sign-in** — `POST /api/v1/collections/{c}/auth/auth-with-anonymous` mints a throwaway user for try-before-signup flows. Off by default per collection; gate rules with `@request.auth.anonymous = false`.
-- **Passkeys (WebAuthn)** — phishing-resistant, passwordless sign-in for auth collections, in-process via go-webauthn. Off by default per collection (`allowPasskeys`); discoverable credentials, no email enumeration, SDK helpers included. → `POST /api/v1/collections/{c}/auth/passkey/login-begin`
-- **WAL change capture** — opt-in logical-replication consumer (`realtime_wal_enabled`) so rows changed by *direct SQL* — psql, the SQL console, the generated RLS role — reach realtime subscribers too, rule-checked like everything else. Captured in-process via `pglogrepl`; no separate change-data-capture service.
-- **Resumable uploads (TUS)** — `POST /api/v1/files/tus/` attaches large files to records over flaky connections with full rule + field-constraint enforcement. No upload sidecar to run.
-- **Schema migrations as files** — dev-mode collection changes are snapshotted to `./gb_migrations/*.json` and replayed on boot, so schemas live in git and deploy reproducibly (`gresbase migrations snapshot|list|apply`).
-- **Editable email templates** — every transactional email customizable from the dashboard, validated at save time, with built-in defaults as a can't-break fallback.
-- **Realtime broadcast + presence** — client-to-client channel messages (`POST /api/v1/realtime/broadcast`, auth required) and per-channel presence with join/leave events and member state. Travels across nodes over `LISTEN/NOTIFY` in multi-node mode.
-- **On-the-fly image transforms** — `?thumb=400x300f&format=jpeg&quality=80` on file URLs, generated in-process and cached. No image-proxy sidecar to run.
-- **File-based JS hooks with hot reload** — drop `*.js` files in `./gb_hooks` to handle record/auth events; edits reload live. No Deno runtime, no cold starts. Scaffold with `gresbase hooks init` (includes `types.d.ts` for editor autocomplete).
-- **Read-replica routing** — set `DATABASE_REPLICA_URL` and record lists, aggregations, and relation expansion route to a PostgreSQL read replica; writes and rule-feeding reads stay on the primary. The scale lever a single-writer SQLite backend structurally cannot offer.
-- **Embed as a Go framework** — write hooks in real Go and add custom routes; see [`backend/examples/embed`](backend/examples/embed).
+- **Vector search (pgvector)**. Add a `vector` field, store embeddings, run rule-aware similarity search. The AI/RAG use-case SQLite-based tools can't reach. → `POST /api/v1/records/{c}/search-vector`
+- **RLS-grade rules without the footguns**. Locked-by-default app-layer rules with a preset catalog and a **rule simulator** ("would user X pass this rule against this record?") so policies are testable before they ship.
+- **Real Postgres RLS, generated**. Compile your collection rules into `CREATE POLICY` statements for a restricted role, so direct database connections are guarded too. → `GET /api/v1/rls/script`, `POST /api/v1/rls/apply`
+- **Webhooks without pg_net**. HMAC-SHA256-signed event forwarding (Stripe-style `t=,v1=` signatures) with retries and a delivery log, delivered by in-process workers. → `/api/v1/webhooks`
+- **SQL console + schema introspection**. A superuser SQL editor (read-only by default) and a structured schema API, all in-process. No separate database-metadata service to run. → `POST /api/v1/sql`, `GET /api/v1/sql/schema`
+- **Typed SDK from your schema**. `gresbase types` or `GET /api/v1/types.ts` generates a typed TypeScript client straight from your live schema. No code-generation service to run.
+- **Horizontal realtime**. Set `realtime_multi_node: true` and record events travel between app nodes over Postgres `LISTEN/NOTIFY`. No Redis, no broker.
+- **Prometheus metrics in-process**. `GET /metrics` text exposition, optional bearer token. No log-shipping sidecars.
+- **REST aggregations**. `count`, `sum`, `avg`, `min`, `max` with `groupBy`, filtered and **list-rule enforced**, computed in SQL so you never ship rows to the client just to count them. → `GET /api/v1/records/{c}/aggregate?aggregate=count,sum:amount&groupBy=status`
+- **Rule-enforced relation expansion**. Forward (`?expand=author`), back-relations (`?expand=comments_via_post`), and nested paths (`comments_via_post.user`, up to 6 levels). Every level honors the target collection's rules, so a public collection can never leak a locked one through expand.
+- **Anonymous sign-in**. `POST /api/v1/collections/{c}/auth/auth-with-anonymous` mints a throwaway user for try-before-signup flows. Off by default per collection; gate rules with `@request.auth.anonymous = false`.
+- **Passkeys (WebAuthn)**. Phishing-resistant, passwordless sign-in for auth collections, in-process via go-webauthn. Off by default per collection (`allowPasskeys`); discoverable credentials, no email enumeration, SDK helpers included. → `POST /api/v1/collections/{c}/auth/passkey/login-begin`
+- **WAL change capture**. An opt-in logical-replication consumer (`realtime_wal_enabled`) so rows changed by *direct SQL* (psql, the SQL console, the generated RLS role) reach realtime subscribers too, rule-checked like everything else. Captured in-process via `pglogrepl`; no separate change-data-capture service.
+- **Resumable uploads (TUS)**. `POST /api/v1/files/tus/` attaches large files to records over flaky connections with full rule + field-constraint enforcement. No upload sidecar to run.
+- **Schema migrations as files**. Dev-mode collection changes are snapshotted to `./gb_migrations/*.json` and replayed on boot, so schemas live in git and deploy reproducibly (`gresbase migrations snapshot|list|apply`).
+- **Editable email templates**. Every transactional email customizable from the dashboard, validated at save time, with built-in defaults as a can't-break fallback.
+- **Realtime broadcast + presence**. Client-to-client channel messages (`POST /api/v1/realtime/broadcast`, auth required) and per-channel presence with join/leave events and member state. Travels across nodes over `LISTEN/NOTIFY` in multi-node mode.
+- **On-the-fly image transforms**. `?thumb=400x300f&format=jpeg&quality=80` on file URLs, generated in-process and cached. No image-proxy sidecar to run.
+- **File-based JS hooks with hot reload**. Drop `*.js` files in `./gb_hooks` to handle record/auth events; edits reload live. No Deno runtime, no cold starts. Scaffold with `gresbase hooks init` (includes `types.d.ts` for editor autocomplete).
+- **Read-replica routing**. Set `DATABASE_REPLICA_URL` and record lists, aggregations, and relation expansion route to a PostgreSQL read replica; writes and rule-feeding reads stay on the primary. The scale lever a single-writer SQLite backend structurally cannot offer.
+- **Embed as a Go framework**. Write hooks in real Go and add custom routes; see [`backend/examples/embed`](backend/examples/embed).
 
 📖 **Full features guide**: [docs/FEATURES.md](docs/FEATURES.md)
 
 [![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6%2B-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](https://github.com/gresbase/gresbase)
+[![CI](https://github.com/Sulaiman-Dauda/gresbase/actions/workflows/ci.yml/badge.svg)](https://github.com/Sulaiman-Dauda/gresbase/actions/workflows/ci.yml)
 
 ---
 
@@ -55,21 +57,21 @@ larger platform does with a sidecar service, Gresbase does with a Postgres featu
 
 A **single-binary, self-hosted backend platform** built on PostgreSQL:
 
-- **Dynamic Collections** — Define PostgreSQL-backed schemas from the dashboard or API, with locked-by-default access rules.
-- **Authentication** — Email/password, OAuth, magic links, OTP, passkeys, API keys, and end-user record auth.
-- **Realtime Engine** — SSE/WebSocket record subscriptions with per-subscriber rule enforcement.
-- **File Storage** — Local or S3-compatible storage, with downloads gated by collection view rules.
-- **Admin Dashboard** — Next.js + Tailwind CSS + shadcn/ui, embedded in the binary.
-- **Extensible** — Event hooks on every request path, Go hooks, and file-based JS hooks (`./gb_hooks`) with hot reload.
+- **Dynamic Collections**. Define PostgreSQL-backed schemas from the dashboard or API, with locked-by-default access rules.
+- **Authentication**. Email/password, OAuth, magic links, OTP, passkeys, API keys, and end-user record auth.
+- **Realtime Engine**. SSE/WebSocket record subscriptions with per-subscriber rule enforcement.
+- **File Storage**. Local or S3-compatible storage, with downloads gated by collection view rules.
+- **Admin Dashboard**. Next.js + Tailwind CSS + shadcn/ui, embedded in the binary.
+- **Extensible**. Event hooks on every request path, Go hooks, and file-based JS hooks (`./gb_hooks`) with hot reload.
 
-Everything runs in one process against one PostgreSQL database — no extra services, brokers, or sidecars.
+Everything runs in one process against one PostgreSQL database, with no extra services, brokers, or sidecars.
 
 ## Quick Start
 
 ### From Source (recommended for development)
 
 ```bash
-git clone https://github.com/gresbase/gresbase
+git clone https://github.com/Sulaiman-Dauda/gresbase
 cd gresbase
 
 # Build everything (frontend + backend → single binary)
@@ -106,7 +108,7 @@ DATABASE_URL="postgres://user:pass@host:5432/gresbase?sslmode=disable" \
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│               Gresbase — Single Static Binary                 │
+│               Gresbase - Single Static Binary                 │
 ├──────────────────────────────────────────────────────────────┤
 │  ┌─────────┐  ┌─────────┐  ┌──────────┐  ┌───────────────┐  │
 │  │   API   │  │ Realtime│  │ Storage  │  │   Admin UI    │  │
@@ -121,7 +123,7 @@ DATABASE_URL="postgres://user:pass@host:5432/gresbase?sslmode=disable" \
 │  ├──────────┬──────────┬──────────┬─────────────────────┤    │
 │  │   Auth   │Collection│ Storage  │   Migrations        │    │
 │  ├──────────┼──────────┼──────────┼─────────────────────┤    │
-│  │    PostgreSQL (pgx) — embedded or external            │    │
+│  │    PostgreSQL (pgx) - embedded or external            │    │
 │  └──────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────┘
 
@@ -132,8 +134,8 @@ instance auto-starts for zero-setup development.
 
 > **Honest note on embedded PostgreSQL:** the embedded mode downloads
 > platform-specific PostgreSQL binaries on first run (internet required) and is
-> intended for development and small deployments. For production — and for
-> air-gapped environments — point `DATABASE_URL` at a managed or self-run
+> intended for development and small deployments. For production (and for
+> air-gapped environments) point `DATABASE_URL` at a managed or self-run
 > PostgreSQL. pgvector features also require external PostgreSQL.
 
 ## Features
@@ -160,7 +162,7 @@ Dynamic collections backed by real PostgreSQL tables:
 
 - **Field types**: text, number, bool, email, url, date, select, json, file, relation, password, editor, geo_point, autodate
 - **Schema migration**: Changing a collection schema automatically alters the underlying PostgreSQL table
-- **Access rules — locked by default**:
+- **Access rules, locked by default**:
   - `null` (or omitted) → **locked**: only superusers can perform the operation
   - `""` → **public**: anyone can perform the operation
   - `"owner = @request.auth.id"` → filter expression evaluated per request/record
@@ -182,8 +184,8 @@ POST /api/v1/admin/users         # Manage admin users
 ```
 
 - JWT access + refresh tokens (HS256 or ES256)
-- **Passkeys (WebAuthn)** — phishing-resistant passwordless sign-in, per-collection opt-in
-- **30 OAuth2 providers** — Google, GitHub, Microsoft, GitLab, Discord, Apple, Facebook, Spotify, Twitch, Notion, Slack, LinkedIn, Kakao, VK, Yandex, and more; configure any with `<PROVIDER>_CLIENT_ID` / `<PROVIDER>_CLIENT_SECRET`
+- **Passkeys (WebAuthn)**. Phishing-resistant passwordless sign-in, per-collection opt-in
+- **30 OAuth2 providers**. Google, GitHub, Microsoft, GitLab, Discord, Apple, Facebook, Spotify, Twitch, Notion, Slack, LinkedIn, Kakao, VK, Yandex, and more; configure any with `<PROVIDER>_CLIENT_ID` / `<PROVIDER>_CLIENT_SECRET`
 - Session management with revocation
 - Rate limiting on auth endpoints
 - API keys with prefix `gb_`
@@ -205,7 +207,7 @@ ws.onmessage = (event) => {
 ```
 
 - Gresbase record topics (`posts/*`, `posts/{id}`)
-- **Access rules enforced per subscriber** — events from locked/filtered collections are only delivered to clients the rules allow (fail-closed)
+- **Access rules enforced per subscriber**. Events from locked/filtered collections are only delivered to clients the rules allow (fail-closed)
 - Per-subscription filter expressions and field picking
 - Cryptographically random client IDs, per-client subscription caps, reserved server event names
 - SSE primary, WebSocket fallback; automatic reconnection; 10k+ concurrent connections
@@ -214,20 +216,20 @@ ws.onmessage = (event) => {
 
 - Local filesystem or S3-compatible backends
 - Signed URLs for secure access
-- **Auto-thumbnails** — `?thumb=100x100` (center crop), `100x100t` (top), `100x100f` (fit); generated on demand, cached, concurrency-capped
-- **File tokens** — `POST /api/v1/files/token` mints a 3-minute token so protected files work in `<img>`/`<video>` tags (`?token=`)
-- **Resumable uploads** — TUS protocol at `/api/v1/files/tus/` for large files over unreliable connections; rules and field constraints enforced
+- **Auto-thumbnails**. `?thumb=100x100` (center crop), `100x100t` (top), `100x100f` (fit); generated on demand, cached, concurrency-capped
+- **File tokens**. `POST /api/v1/files/token` mints a 3-minute token so protected files work in `<img>`/`<video>` tags (`?token=`)
+- **Resumable uploads**. TUS protocol at `/api/v1/files/tus/` for large files over unreliable connections; rules and field constraints enforced
 - Automatic MIME type detection
 - File metadata tracking
 - Per-collection file organization
-- **Scheduled backups** — set `backup_cron`; snapshots prune to `backup_max_keep` and mirror to S3 with `backup_upload_s3`
+- **Scheduled backups**. Set `backup_cron`; snapshots prune to `backup_max_keep` and mirror to S3 with `backup_upload_s3`
 
 ### 5. TLS
 
 Gresbase does not run its own certificate authority. Terminate TLS one of two ways:
 
-- **Reverse proxy (recommended for production)** — front Gresbase with Caddy, nginx, or Traefik and let it handle certificates (e.g. via Let's Encrypt). Gresbase listens on plain HTTP behind the proxy.
-- **Operator-provided certificates** — set `ENABLE_TLS=true` and point `TLS_CERT_FILE` / `TLS_KEY_FILE` at your own certificate and key, and Gresbase serves HTTPS directly.
+- **Reverse proxy (recommended for production)**. Front Gresbase with Caddy, nginx, or Traefik and let it handle certificates (e.g. via Let's Encrypt). Gresbase listens on plain HTTP behind the proxy.
+- **Operator-provided certificates**. Set `ENABLE_TLS=true` and point `TLS_CERT_FILE` / `TLS_KEY_FILE` at your own certificate and key, and Gresbase serves HTTPS directly.
 
 ### 6. Admin Dashboard
 
@@ -288,33 +290,33 @@ Configuration via `gresbase.yaml`, environment variables, or CLI flags:
 | Key | Env | Default | Description |
 |-----|-----|---------|-------------|
 | `addr` | `ADDR` | `:8080` | Server address |
-| `database_url` | `DATABASE_URL` | — | PostgreSQL URL (**required**) |
-| `jwt_secret` | `JWT_SECRET` | — | JWT signing secret |
-| `storage_backend` | — | `local` | `local` or `s3` |
+| `database_url` | `DATABASE_URL` | none | PostgreSQL URL (**required**) |
+| `jwt_secret` | `JWT_SECRET` | none | JWT signing secret |
+| `storage_backend` | none | `local` | `local` or `s3` |
 | `storage_local_path` | `STORAGE_PATH` | `./storage` | Local storage path |
 | `enable_tls` | `ENABLE_TLS` | `false` | Serve HTTPS directly from cert files |
-| `tls_cert_file` | `TLS_CERT_FILE` | — | TLS certificate file (with `ENABLE_TLS`) |
-| `tls_key_file` | `TLS_KEY_FILE` | — | TLS key file (with `ENABLE_TLS`) |
-| `dev_mode` | — | `false` | Development mode |
+| `tls_cert_file` | `TLS_CERT_FILE` | none | TLS certificate file (with `ENABLE_TLS`) |
+| `tls_key_file` | `TLS_KEY_FILE` | none | TLS key file (with `ENABLE_TLS`) |
+| `dev_mode` | none | `false` | Development mode |
 | `log_level` | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
 ## Tech Stack
 
 ### Backend (Go)
-- `chi` — HTTP routing
-- `pgx` — PostgreSQL driver
-- `golang-jwt` — JWT handling
-- `gorilla/websocket` — WebSocket
-- `zerolog` — Structured logging
-- `cobra` — CLI framework
+- `chi`, HTTP routing
+- `pgx`, PostgreSQL driver
+- `golang-jwt`, JWT handling
+- `gorilla/websocket`, WebSocket
+- `zerolog`, structured logging
+- `cobra`, CLI framework
 
 ### Frontend (TypeScript)
-- `Next.js 14` — React framework
-- `Tailwind CSS` — Utility-first CSS
-- `shadcn/ui` — Component library
-- `Framer Motion` — Animations
-- `TanStack Query` — Server state
-- `Zustand` — Client state
+- `Next.js 14`, React framework
+- `Tailwind CSS`, utility-first CSS
+- `shadcn/ui`, component library
+- `Framer Motion`, animations
+- `TanStack Query`, server state
+- `Zustand`, client state
 
 ## Deployment
 
@@ -381,35 +383,35 @@ gresbase/
 This is a **1.0 release** with a production-ready core. Here's an honest assessment:
 
 ### What works well ✅
-- **Security model** — Locked-by-default access rules enforced across REST, batch, search, files, and realtime delivery. Covered by integration regression tests against a real PostgreSQL.
-- **Authentication** — Email/password, OAuth providers, OTP, magic links, API keys, end-user (record) auth with rate limiting.
-- **Dynamic Collections** — Schema editor, PostgreSQL-backed tables, 14 field types, locked-by-default rules, import/export.
-- **Records** — CRUD with rule-aware list compilation to SQL WHERE, rule-enforced relation expansion (forward, back-relation, nested), aggregations, field picking, transactional batch.
-- **Realtime engine** — SSE primary / WebSocket fallback with per-subscriber rule enforcement, channel broadcast + presence, subscription caps, and unguessable client IDs.
-- **Admin dashboard** — Collections workbench (schema, records, rules, API preview), admins, logs, metrics, settings, API keys, realtime tester. Embedded into the single binary.
-- **Filter/query engine** — Expression-based filtering (`&&`/`||`/`AND`/`OR`), compiled to parameterized SQL.
-- **Configuration** — YAML + env vars; production refuses weak or generated JWT secrets.
-- **Integration test suite** — End-to-end tests boot an ephemeral PostgreSQL and exercise the real HTTP surface.
+- **Security model**. Locked-by-default access rules enforced across REST, batch, search, files, and realtime delivery. Covered by integration regression tests against a real PostgreSQL.
+- **Authentication**. Email/password, OAuth providers, OTP, magic links, API keys, end-user (record) auth with rate limiting.
+- **Dynamic Collections**. Schema editor, PostgreSQL-backed tables, 14 field types, locked-by-default rules, import/export.
+- **Records**. CRUD with rule-aware list compilation to SQL WHERE, rule-enforced relation expansion (forward, back-relation, nested), aggregations, field picking, transactional batch.
+- **Realtime engine**. SSE primary / WebSocket fallback with per-subscriber rule enforcement, channel broadcast + presence, subscription caps, and unguessable client IDs.
+- **Admin dashboard**. Collections workbench (schema, records, rules, API preview), admins, logs, metrics, settings, API keys, realtime tester. Embedded into the single binary.
+- **Filter/query engine**. Expression-based filtering (`&&`/`||`/`AND`/`OR`), compiled to parameterized SQL.
+- **Configuration**. YAML + env vars; production refuses weak or generated JWT secrets.
+- **Integration test suite**. End-to-end tests boot an ephemeral PostgreSQL and exercise the real HTTP surface.
 
 ### Deploy notes
-- **Embedded PostgreSQL** — the single-binary embedded PostgreSQL mode is intended for development and small deployments. For production, point `DATABASE_URL` at an external (managed or self-run) PostgreSQL; pgvector features also require external PostgreSQL.
-- **TLS** — terminate at a reverse proxy (Caddy/nginx/Traefik), or serve HTTPS directly from operator-provided cert files via `ENABLE_TLS` + `TLS_CERT_FILE` / `TLS_KEY_FILE`.
+- **Embedded PostgreSQL**. The single-binary embedded PostgreSQL mode is intended for development and small deployments. For production, point `DATABASE_URL` at an external (managed or self-run) PostgreSQL; pgvector features also require external PostgreSQL.
+- **TLS**. Terminate at a reverse proxy (Caddy/nginx/Traefik), or serve HTTPS directly from operator-provided cert files via `ENABLE_TLS` + `TLS_CERT_FILE` / `TLS_KEY_FILE`.
 
 ### Known limitations
 - **SDK packages are not yet published to registries.** Both clients are build-ready and tested (`sdk/typescript`: dual CJS/ESM build, 43 tests; `sdk/dart`: parity feature set, 26 tests); npm and pub.dev publication is pending. Use them directly from this repository in the meantime.
 - **Presence member lists are node-local** in multi-node mode. Join/leave events still propagate across nodes; only the point-in-time member snapshot is per-node.
-- **Some advanced features require external PostgreSQL** — vector search needs the `pgvector` extension, and WAL change capture needs `wal_level = logical`. The embedded PostgreSQL is for development and small single-node deployments.
+- **Some advanced features require external PostgreSQL**. Vector search needs the `pgvector` extension, and WAL change capture needs `wal_level = logical`. The embedded PostgreSQL is for development and small single-node deployments.
 
-### Scope — what Gresbase intentionally leaves out
+### Scope, what Gresbase intentionally leaves out
 
 Gresbase keeps a deliberately small surface so the whole system stays in one process:
 
-- **No GraphQL.** The REST surface — filtering, relation expansion, and aggregation — covers the same ground without a second query language to secure.
+- **No GraphQL.** The REST surface (filtering, relation expansion, and aggregation) covers the same ground without a second query language to secure.
 - **No separate edge-function runtime, API gateway, connection pooler, or analytics service.** Each of those would be another process with its own port and secrets. Extensibility is covered in-process by Go hooks and file-based JS hooks instead.
 
 ### Test coverage
 
-Core paths are covered by integration tests that boot a real PostgreSQL and exercise the live HTTP surface — authentication, collections, records, locked-by-default rule enforcement (across REST, batch, search, file downloads, and realtime delivery), and the realtime engine. The suite runs on every CI build with the race detector enabled.
+Core paths are covered by integration tests that boot a real PostgreSQL and exercise the live HTTP surface. They cover authentication, collections, records, locked-by-default rule enforcement (across REST, batch, search, file downloads, and realtime delivery), and the realtime engine. The suite runs on every CI build with the race detector enabled.
 
 ## License
 
