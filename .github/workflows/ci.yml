@@ -26,9 +26,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # 1.25.12 or newer: 1.25.11 carries GO-2026-5856, an Encrypted Client
-          # Hello privacy leak in crypto/tls that govulncheck finds reachable.
-          go-version: '>=1.25.12'
+          # The newest 1.26 patch, fetched rather than taken from the runner's
+          # cache, so a standard library fix reaches govulncheck as soon as Go
+          # ships it. A range like '>=1.25.12' kept the cached 1.26.9, which
+          # carries GO-2026-6809 (crypto/x509), fixed in 1.26.10.
+          go-version: '1.26.x'
+          check-latest: true
           cache-dependency-path: backend/go.sum
 
       - name: Add PostgreSQL binaries to PATH
