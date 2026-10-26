@@ -33,9 +33,10 @@ RUN npm run build
 # ──────────────────────────────────────────────────────────────────────────
 # Stage 2 — Embed the dashboard and compile the static Go binary
 # ──────────────────────────────────────────────────────────────────────────
-# Backend module requires Go 1.25. Pinned by digest; refresh with:
-#   skopeo inspect --no-tags docker://docker.io/library/golang:1.25
-FROM golang:1.25@sha256:379065f16fe8cce7949001ba9cffc827cd4b93d69495dec405befd1c13e19bb3 AS backend-builder
+# Must match the `go` line in backend/go.mod: the image sets GOTOOLCHAIN=local, so an older Go
+# stops at `go mod download`. Pinned by digest; refresh with:
+#   skopeo inspect --no-tags docker://docker.io/library/golang:1.26
+FROM golang:1.26@sha256:672c944cfd07599b5f1bb179869270cdc94c6254e41db4d431259693cb286b82 AS backend-builder
 
 # Version stamp — keep in sync with the Makefile LDFLAGS.
 ARG VERSION=1.0.0
